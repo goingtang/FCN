@@ -179,15 +179,35 @@ def cmd_path(a: argparse.Namespace) -> int:
     if terms.coupon_pa is None:
         raise SystemExit("path 子命令需要 --coupon")
 
-    md = _load(terms, a.tenor / 12 + 2, a.end)
-    sch = build_schedule(terms, md.trading_days, pd.Timestamp(a.trade_date))
+    # 行情區間依交易日決定；若沿用「自今日往回推」，較早的交易日會被悄悄
+    # 順延到資料起點，得到看似合理卻完全錯誤的結果。
+    td = pd.Timestamp(a.trade_date)
+    today = pd.Timestamp(a.end) if a.end else pd.Timestamp.today().normalize()
+    md = load_market_data(
+        terms.underlyings,
+        td - pd.Timedelta(days=10),
+        min(td + pd.DateOffset(months=terms.tenor_months) + pd.Timedelta(days=45), today),
+    )
+    sch = build_schedule(terms, md.trading_days, td)
+    if (sch.trade_date - td).days > 7:
+        raise SystemExit(
+            f"{td.date()} 之後 7 天內沒有共同交易日（最接近的是 {sch.trade_date.date()}），"
+            "請確認該日期是否早於標的上市日"
+        )
     if sch.final_valuation > md.trading_days[-1]:
         raise SystemExit(
             f"行情資料只到 {md.trading_days[-1].date()}，"
-            f"無法涵蓋至期末評價日 {sch.final_valuation.date()}"
+            f"無法涵蓋至期末評價日 {sch.final_valuation.date()}；此契約尚未到期"
         )
     outcome = evaluate(terms, md.closes, sch)
     print(report.format_full_report(terms, sch, outcome=outcome))
+    return 0
+
+
+def cmd_serve(a: argparse.Namespace) -> int:
+    from .webapp import serve
+
+    serve(a.host, a.port)
     return 0
 
 
@@ -223,6 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--trade-date", required=True, help="交易日 YYYY-MM-DD")
     s.add_argument("--end", default=None, help="行情擷取截止日")
     s.set_defaults(func=cmd_path)
+
+    w = sub.add_parser("serve", help="啟動網頁介面")
+    w.add_argument("--host", default="127.0.0.1")
+    w.add_argument("--port", type=int, default=8000)
+    w.set_defaults(func=cmd_serve)
 
     a = p.parse_args(argv)
     return a.func(a)

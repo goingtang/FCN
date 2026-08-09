@@ -65,6 +65,13 @@ def build_schedule(
 
     anchor = td if terms.tenor_from == "trade" else issue
     fvd_target = anchor + pd.DateOffset(months=terms.tenor_months)
+    # 資料尾端不足時必須明確失敗：否則 _on_or_before 會把期末評價日夾到最後一個
+    # 交易日，等於把契約悄悄截短，產出看似正常卻錯誤的結果。
+    if fvd_target > days[-1]:
+        raise ValueError(
+            f"行情資料只到 {days[-1].date()}，不足以涵蓋期末評價日 "
+            f"{fvd_target.date()}（契約尚未到期）"
+        )
     fvd = _on_or_before(days, fvd_target)
     if fvd <= issue:
         raise ValueError("期末評價日不得早於發行日，請確認天期與行情區間")

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FCN 詢價平台</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📈</text></svg>">
+</head>
+<body>
+
+<header>
+  <h1>FCN 境外結構型商品 · 詢價與模擬平台</h1>
+  <p>固定配息提前出場 (FCN) / 可參與漲幅 (Upside FCN) — 條款求解、公允定價、損益模擬、歷史回測</p>
+</header>
+
+<nav>
+  <button data-tab="quote" class="on">詢價與模擬</button>
+  <button data-tab="backtest">歷史回測</button>
+  <button data-tab="path">單筆路徑檢視</button>
+</nav>
+
+<main>
+
+<!-- ======================= 條件設定（共用） ======================= -->
+<section class="panel">
+  <h2>報價條件設定</h2>
+  <p class="hint">
+    對應詢價平台操作：<b>欲詢價的參數請將該欄位留白</b>（一次僅能留白一欄）。
+    百分比欄位直接填數字，例如執行價填 <code>80</code> 代表 80%。
+  </p>
+
+  <div class="sheet">
+    <table class="rfq">
+      <thead>
+        <tr>
+          <th>Product<small>產品</small></th>
+          <th>UD1<small>連結標的1</small></th>
+          <th>UD2<small>連結標的2</small></th>
+          <th>UD3<small>連結標的3</small></th>
+          <th>UD4<small>連結標的4</small></th>
+          <th>CCY<small>幣別</small></th>
+          <th>Tenor(M)<small>天期(月)</small></th>
+          <th>Cpn p.a.<small>年化配息</small></th>
+          <th>I Delay<small>發行日</small></th>
+          <th>Cpn Freq<small>配息頻率</small></th>
+          <th>Put Strike<small>執行價</small></th>
+          <th>KO Type<small>提前出場型式</small></th>
+          <th>Autocall<small>提前出場價</small></th>
+          <th id="th-lc">Lower Call<small>參與表現價</small></th>
+          <th>KI Type<small>觸及生效型式</small></th>
+          <th>KI Level<small>下限價</small></th>
+          <th>Rebate<small>行銷通路費</small></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><select id="f-product">
+            <option value="fcn">FCN</option>
+            <option value="upside">Upside FCN</option>
+          </select></td>
+          <td><input id="f-ud1" value="TSM UN" placeholder="TSM UN"></td>
+          <td><input id="f-ud2" value="NVDA UW"></td>
+          <td><input id="f-ud3" value="MSFT UW"></td>
+          <td><input id="f-ud4" placeholder="—"></td>
+          <td><input id="f-ccy" value="USD"></td>
+          <td><input id="f-tenor" value="12" inputmode="numeric"></td>
+          <td><input id="f-coupon" placeholder="留白詢價" inputmode="decimal"></td>
+          <td><input id="f-idelay" value="5" inputmode="numeric"></td>
+          <td><select id="f-freq">
+            <option>Monthly</option><option>Quarterly</option>
+            <option>Semiannual</option><option>Annual</option>
+          </select></td>
+          <td><input id="f-strike" value="80" inputmode="decimal"></td>
+          <td><select id="f-kotype">
+            <option>Daily Memory</option><option>Daily</option>
+            <option>Monthly Memory</option><option>Monthly</option><option>None</option>
+          </select></td>
+          <td><input id="f-autocall" value="100" inputmode="decimal"></td>
+          <td id="td-lc" class="na">NA</td>
+          <td><select id="f-kitype">
+            <option>AKI</option><option>EKI</option><option value="NA">NA</option>
+          </select></td>
+          <td id="td-ki"><input id="f-ki" value="60" inputmode="decimal"></td>
+          <td><input id="f-rebate" value="3" inputmode="decimal"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="opts">
+    <div class="opt"><label>面額 Notional</label>
+      <input id="f-notional" value="100000" inputmode="decimal"></div>
+    <div class="opt"><label>參與率 %（Upside）</label>
+      <input id="f-participation" value="100" inputmode="decimal" disabled></div>
+    <div class="opt"><label>KO 鎖定期（月）</label>
+      <input id="f-lockout" value="1" inputmode="numeric"></div>
+    <div class="opt"><label>波動校準回顧（年）</label>
+      <input id="f-lookback" value="2" inputmode="decimal"></div>
+    <div class="opt"><label>無風險利率 %（空=自動）</label>
+      <input id="f-rate" placeholder="^IRX"></div>
+    <div class="opt"><label>模擬路徑數</label>
+      <select id="f-paths">
+        <option value="20000">20,000（快）</option>
+        <option value="40000" selected>40,000</option>
+        <option value="100000">100,000（精確）</option>
+      </select></div>
+    <div class="opt"><label>提前出場配息</label>
+      <select id="f-accrual">
+        <option value="accrued">ACT/365 累計計息</option>
+        <option value="full_periods">僅完整期數</option>
+      </select></div>
+  </div>
+
+  <div class="actions">
+    <button class="go" id="btn-quote">執行詢價與模擬</button>
+    <button class="ghost" id="btn-preset-fcn">載入 FCN 範例</button>
+    <button class="ghost" id="btn-preset-upside">載入 Upside FCN 範例</button>
+    <span class="status" id="status-quote"></span>
+  </div>
+</section>
+
+<div id="msg-box"></div>
+
+<!-- ======================= 詢價 tab ======================= -->
+<div class="tab on" id="tab-quote">
+  <div id="quote-out"></div>
+</div>
+
+<!-- ======================= 回測 tab ======================= -->
+<div class="tab" id="tab-backtest">
+  <section class="panel">
+    <h2>回測設定</h2>
+    <p class="hint">
+      對上方條款，在歷史上每隔 N 個交易日發行一檔並持有到結束。
+      配息若留白，會先以模型公允值填入。
+    </p>
+    <div class="opts">
+      <div class="opt"><label>回測年數</label><input id="f-bt-years" value="5"></div>
+      <div class="opt"><label>進場間隔（交易日）</label><input id="f-bt-step" value="5"></div>
+    </div>
+    <div class="actions">
+      <button class="go" id="btn-backtest">執行回測</button>
+      <span class="status" id="status-backtest"></span>
+    </div>
+  </section>
+  <div id="backtest-out"></div>
+</div>
+
+<!-- ======================= 路徑 tab ======================= -->
+<div class="tab" id="tab-path">
+  <section class="panel">
+    <h2>單筆路徑檢視</h2>
+    <p class="hint">
+      指定一個歷史交易日，用實際行情逐日跑完整份契約，顯示記憶事件、觸及生效事件與到期比價。
+      此功能需要完整條款，<b>配息不可留白</b>。
+    </p>
+    <div class="opts">
+      <div class="opt"><label>交易日</label><input id="f-path-date" type="date" value="2024-06-03"></div>
+    </div>
+    <div class="actions">
+      <button class="go" id="btn-path">檢視路徑</button>
+      <span class="status" id="status-path"></span>
+    </div>
+  </section>
+  <div id="path-out"></div>
+</div>
+
+</main>
+
+<footer>
+  本工具為條款模擬與教育用途，非投資建議；實際給付以發行機構之產品說明書與條款確認書為準。<br>
+  FCN 屬不保本商品，產品風險等級 RR4~RR5，僅限專業投資人投資。
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

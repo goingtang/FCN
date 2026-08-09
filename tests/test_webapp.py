@@ -353,7 +353,36 @@ def test_deployment_files_are_consistent():
     assert (root / entry).is_file(), f"zbpack.json 指向不存在的進入點 {entry}"
 
     src = (root / entry).read_text()
-    assert "serve()" in src and "from fcn.webapp import serve" in src
+    assert "from fcn.webapp import serve" in src and "serve(" in src
 
     reqs = (root / "requirements.txt").read_text()
     assert "numpy" in reqs and "pandas" in reqs
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [
+        ({}, ("0.0.0.0", 8080)),                       # 平台沒注入時仍要對外綁 8080
+        ({"PORT": "3000"}, ("0.0.0.0", 3000)),
+        ({"HOST": "::", "PORT": "9000"}, ("::", 9000)),
+    ],
+)
+def test_deploy_entrypoint_always_binds_publicly(monkeypatch, env, expected):
+    """容器內綁 127.0.0.1，平台的反向代理完全連不到，部署進入點不得回退成本機。"""
+    import runpy
+    import sys
+    import types
+
+    for k in ("HOST", "PORT"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+    seen = {}
+    stub = types.ModuleType("fcn.webapp")
+    stub.serve = lambda host=None, port=None: seen.update(host=host, port=port)
+    monkeypatch.setitem(sys.modules, "fcn.webapp", stub)
+
+    root = webapp.WEB_DIR.parent.parent
+    runpy.run_path(str(root / "main.py"), run_name="__main__")
+    assert (seen["host"], seen["port"]) == expected

@@ -264,10 +264,12 @@ def evaluate(terms: FCNTerms, closes: pd.DataFrame, schedule: Schedule) -> FCNOu
 
     # ⑤ 承接表現最差標的
     delivery_price = float(initial[worst_symbol] * terms.strike_pct)
+    final_worst = float(final_all[worst_symbol])
     exact = terms.notional / delivery_price
     if terms.integer_shares:
+        # 條款：交付整股（面額 / 執行價），未足整股者以期末評價日收盤價折算現金
         shares = float(np.floor(exact))
-        residual = float(terms.notional - shares * delivery_price)
+        residual = float((exact - shares) * final_worst)
     else:
         shares = float(exact)
         residual = 0.0
@@ -289,7 +291,7 @@ def evaluate(terms: FCNTerms, closes: pd.DataFrame, schedule: Schedule) -> FCNOu
         delivered_symbol=worst_symbol,
         delivery_price=delivery_price,
         shares=shares,
-        stock_value=float(shares * final_all[worst_symbol]),
+        stock_value=float(shares * final_worst),
         residual_cash=residual,
         **common,
     )

@@ -290,9 +290,11 @@ def _coupon_factors(terms: FCNTerms, grid: StepGrid, res: PathResults, rate: flo
 
 @dataclass
 class PricingResult:
-    fair_coupon_pa: float
+    fair_coupon_pa: float                # 已扣除報價單上的行銷通路費
+    fair_coupon_gross: float             # 假設通路費為 0 時的公允配息率
     quoted_coupon_pa: float | None
     pv_at_quote: float | None            # 以券商報價計算的理論價值（面額 = 1.0）
+    rebate: float
     scenario_probs: dict[str, float]
     prob_ki: float
     prob_delivery: float
@@ -305,6 +307,17 @@ class PricingResult:
     def value_gap_pct(self) -> float | None:
         """券商報價相對公允價值的差距（負值 = 投資人吃虧）。"""
         return None if self.pv_at_quote is None else self.pv_at_quote - 1.0
+
+    @property
+    def implied_total_fee(self) -> float | None:
+        """報價隱含的總抽成（發行商利潤 + 通路費），以面額比例表示。"""
+        return None if self.pv_at_quote is None else 1.0 - self.pv_at_quote
+
+    @property
+    def issuer_margin(self) -> float | None:
+        """扣掉報價單載明的通路費之後，發行商保留的部分。"""
+        fee = self.implied_total_fee
+        return None if fee is None else fee - self.rebate
 
 
 @dataclass
@@ -389,7 +402,13 @@ def price(
     pv_redemption = float((res.redemption * df_exit).mean())
     pv_annuity = float(annuity.mean())
 
-    fair = (1.0 - pv_redemption) / pv_annuity if pv_annuity > 0 else float("nan")
+    # 投資人付出面額 100%，其中行銷通路費先被抽走，剩下才是產品的理論價值：
+    #   PV_贖回 + c x A = 100% - Rebate
+    if pv_annuity > 0:
+        fair = (1.0 - terms.rebate - pv_redemption) / pv_annuity
+        fair_gross = (1.0 - pv_redemption) / pv_annuity
+    else:
+        fair = fair_gross = float("nan")
 
     pv_at_quote = None
     if terms.coupon_pa is not None:
@@ -397,8 +416,10 @@ def price(
 
     return PricingResult(
         fair_coupon_pa=fair,
+        fair_coupon_gross=fair_gross,
         quoted_coupon_pa=terms.coupon_pa,
         pv_at_quote=pv_at_quote,
+        rebate=terms.rebate,
         scenario_probs=_scenario_probs(res.scenario),
         prob_ki=float(res.ki_hit.mean()),
         prob_delivery=float((res.scenario == DELIVERY).mean()),
@@ -407,6 +428,145 @@ def price(
         market=mp,
         schedule=schedule,
     )
+
+
+SOLVABLE_FIELDS = (
+    "coupon_pa",
+    "rebate",
+    "strike_pct",
+    "ki_pct",
+    "autocall_pct",
+    "lower_call_strike_pct",
+)
+
+# 詢價平台可受理的範圍，同時作為二分搜尋的預設區間
+_PLATFORM_BOUNDS = {
+    "strike_pct": (0.50, 1.00),
+    "ki_pct": (0.50, 0.99),
+    "autocall_pct": (0.90, 1.20),
+    "lower_call_strike_pct": (1.00, 2.00),
+}
+
+_EPS = 1e-4
+
+
+def _bounds_for(terms: FCNTerms, field: str) -> tuple[float, float]:
+    """取得搜尋區間，並收斂到條款本身的合法範圍（下限價 < 執行價 < 參與表現價）。"""
+    lo, hi = _PLATFORM_BOUNDS[field]
+    if field == "ki_pct":
+        hi = min(hi, terms.strike_pct - _EPS)
+    elif field == "strike_pct":
+        if terms.ki_type is not KIType.NONE and terms.ki_pct is not None:
+            lo = max(lo, terms.ki_pct + _EPS)
+        if terms.is_upside:
+            hi = min(hi, terms.lower_call_strike_pct - _EPS)
+    elif field == "lower_call_strike_pct":
+        lo = max(lo, terms.strike_pct + _EPS)
+    if lo >= hi:
+        raise ValueError(f"{field} 的合法搜尋區間為空（其他條款已把它夾死）")
+    return lo, hi
+
+
+@dataclass
+class SolveResult:
+    """對「留白欄位」求解的結果。"""
+
+    field: str
+    value: float
+    terms: FCNTerms                 # 已填入解值的完整條款
+    pv: float                       # 解出的條款下，投資人取得現金流的現值
+    iterations: int
+    n_paths: int
+    bracket: tuple[float, float] | None = None
+
+
+def _pv_components(
+    terms: FCNTerms, mp: MarketParams, grid: StepGrid, paths: np.ndarray
+) -> tuple[float, float]:
+    """回傳 (贖回現值, 每單位配息率的年金現值)。"""
+    res = _evaluate_paths(terms, grid, paths)
+    annuity, _ = _coupon_factors(terms, grid, res, mp.rate)
+    df = np.exp(-mp.rate * np.maximum(res.exit_t, 0.0))
+    return float((res.redemption * df).mean()), float(annuity.mean())
+
+
+def solve(
+    terms: FCNTerms,
+    mp: MarketParams,
+    *,
+    field: str,
+    trade_date: pd.Timestamp,
+    n_paths: int = 20_000,
+    seed: int = 20260809,
+    bounds: tuple[float, float] | None = None,
+    tol: float = 1e-5,
+    max_iter: int = 30,
+) -> SolveResult:
+    """求解報價單上留白的那一個欄位，使產品定價回到面額 100%。
+
+    對應詢價平台「欲詢價參數請於該欄位留白」的行為。``coupon_pa`` 與
+    ``rebate`` 有封閉解；其餘欄位以二分搜尋求解，並對所有候選值重用同一批
+    隨機路徑（common random numbers），使目標函數平滑且結果可重現。
+    """
+    from dataclasses import replace
+
+    if field not in SOLVABLE_FIELDS:
+        raise ValueError(f"不支援求解欄位 {field!r}；可解欄位：{', '.join(SOLVABLE_FIELDS)}")
+    if field == "lower_call_strike_pct" and not terms.is_upside:
+        raise ValueError("僅 Upside FCN 可求解參與表現價")
+    if field != "coupon_pa" and terms.coupon_pa is None:
+        raise ValueError(f"求解 {field} 需要已知的 coupon_pa（其他欄位不可同時留白）")
+
+    cal = future_trading_days(trade_date, terms.tenor_months + 2)
+    schedule = build_schedule(terms, cal, trade_date)
+    grid = build_grid(terms, schedule, cal)
+
+    rng = np.random.default_rng(seed)
+    paths = _simulate_chunk(mp, grid, n_paths, rng, risk_neutral=True).astype(np.float32)
+
+    # --- 封閉解 ---
+    if field in ("coupon_pa", "rebate"):
+        pv_red, pv_ann = _pv_components(terms, mp, grid, paths)
+        if field == "coupon_pa":
+            value = (1.0 - terms.rebate - pv_red) / pv_ann
+            solved = replace(terms, coupon_pa=value)
+            pv = pv_red + value * pv_ann
+        else:
+            value = 1.0 - pv_red - terms.coupon_pa * pv_ann
+            solved = replace(terms, rebate=value)
+            pv = pv_red + terms.coupon_pa * pv_ann
+        return SolveResult(field, value, solved, pv, 0, n_paths)
+
+    # --- 二分搜尋 ---
+    lo, hi = bounds or _bounds_for(terms, field)
+    target = 1.0 - terms.rebate
+
+    def pv_of(x: float) -> float:
+        cand = replace(terms, **{field: x})
+        pv_red, pv_ann = _pv_components(cand, mp, grid, paths)
+        return pv_red + cand.coupon_pa * pv_ann
+
+    f_lo, f_hi = pv_of(lo) - target, pv_of(hi) - target
+    if f_lo * f_hi > 0:
+        raise ValueError(
+            f"{field} 在 [{lo:.2%}, {hi:.2%}] 內無解："
+            f"兩端理論價值為 {f_lo + target:.4f} 與 {f_hi + target:.4f}，"
+            f"皆未跨越目標 {target:.4f}。請放寬 bounds 或調整其他條款。"
+        )
+
+    it = 0
+    while it < max_iter and (hi - lo) > tol:
+        mid = 0.5 * (lo + hi)
+        f_mid = pv_of(mid) - target
+        if f_lo * f_mid <= 0:
+            hi, f_hi = mid, f_mid
+        else:
+            lo, f_lo = mid, f_mid
+        it += 1
+
+    value = 0.5 * (lo + hi)
+    solved = replace(terms, **{field: value})
+    return SolveResult(field, value, solved, pv_of(value), it, n_paths, (lo, hi))
 
 
 def forecast(

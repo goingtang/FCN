@@ -44,7 +44,12 @@ def format_terms(terms: FCNTerms, schedule: Schedule | None = None) -> str:
         f"  提前出場 (Autocall) {terms.autocall_pct:.2%}   型式 {terms.ko_type.value}"
         f"（鎖定期 {terms.ko_lockout_months} 個月）",
         f"  下限價 (KI Level)   {ki}   型式 {ki_type}",
+        f"  行銷通路費 (Rebate) {terms.rebate:.2%}",
     ]
+    breaches = terms.check_platform_limits()
+    if breaches:
+        lines.append("  ⚠ 超出詢價平台可受理範圍：")
+        lines += [f"      - {b}" for b in breaches]
     if terms.is_upside:
         lines.append(
             f"  參與表現價 (Lower Call Strike) {terms.lower_call_strike_pct:.2%}"
@@ -183,15 +188,21 @@ def format_pricing(pr: PricingResult, terms: FCNTerms) -> str:
         "",
         _rule("風險中性定價"),
         f"  蒙地卡羅路徑數      {pr.n_paths:,}",
-        f"  ★ 公允年化配息率    {pr.fair_coupon_pa:.2%}",
+        f"  ★ 公允年化配息率    {pr.fair_coupon_pa:.2%}"
+        + (f"（已扣 {pr.rebate:.2%} 通路費）" if pr.rebate else ""),
     ]
+    if pr.rebate:
+        lines.append(f"    未扣通路費者        {pr.fair_coupon_gross:.2%}")
     if pr.quoted_coupon_pa is not None:
         gap = pr.value_gap_pct or 0.0
         verdict = "偏低（投資人吃虧）" if gap < -0.005 else ("合理" if gap < 0.005 else "偏高（划算）")
         lines += [
             f"  券商報價配息率      {pr.quoted_coupon_pa:.2%}",
+            f"    配息缺口          {(pr.quoted_coupon_pa - pr.fair_coupon_pa) * 100:+.2f} 個百分點",
             f"  以報價計算的理論價值 {pr.pv_at_quote * 100:.2f}%（面額 100%）",
             f"  價值差距            {gap * 100:+.2f} 個百分點  →  {verdict}",
+            f"    其中 報價單通路費  {pr.rebate * 100:.2f} 個百分點",
+            f"    其中 發行商保留    {(pr.issuer_margin or 0.0) * 100:.2f} 個百分點",
         ]
     lines += [
         "",
@@ -205,6 +216,34 @@ def format_pricing(pr: PricingResult, terms: FCNTerms) -> str:
     ]
     for k, v in pr.scenario_probs.items():
         lines.append(f"    {k:<26}{v:>8.2%}")
+    return "\n".join(lines)
+
+
+_SOLVE_LABELS = {
+    "coupon_pa": "年化配息 (Cpn p.a.)",
+    "rebate": "行銷通路費 (Rebate)",
+    "strike_pct": "執行價 (Put Strike)",
+    "ki_pct": "下限價 (KI Level)",
+    "autocall_pct": "提前出場價 (Autocall)",
+    "lower_call_strike_pct": "參與表現價 (Lower Call Strike)",
+}
+
+
+def format_solve(sr) -> str:
+    """格式化「留白欄位」的求解結果。"""
+    label = _SOLVE_LABELS.get(sr.field, sr.field)
+    lines = [
+        _rule("詢價結果（留白欄位求解）"),
+        f"  留白欄位            {label}",
+        f"  ★ 求得數值          {sr.value:.4%}",
+        f"  對應理論價值        {sr.pv * 100:.4f}%（目標 {(1 - sr.terms.rebate) * 100:.2f}%）",
+        f"  蒙地卡羅路徑數      {sr.n_paths:,}"
+        + (f"（二分搜尋 {sr.iterations} 次）" if sr.iterations else "（封閉解）"),
+    ]
+    breaches = sr.terms.check_platform_limits()
+    if breaches:
+        lines.append("  ⚠ 解出的條款超出詢價平台可受理範圍：")
+        lines += [f"      - {b}" for b in breaches]
     return "\n".join(lines)
 
 
@@ -265,8 +304,11 @@ def format_full_report(
     forecast: ForecastResult | None = None,
     backtest: BacktestResult | None = None,
     outcome: FCNOutcome | None = None,
+    solve=None,
 ) -> str:
     parts = [format_terms(terms, schedule)]
+    if solve is not None:
+        parts.append(format_solve(solve))
     if outcome is not None:
         parts += [format_levels(outcome), format_outcome(outcome)]
     if pricing is not None:

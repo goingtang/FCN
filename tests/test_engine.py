@@ -295,16 +295,41 @@ def test_full_period_coupon_mode():
     assert out.coupon_cashflows[-1][0] <= out.exit_date
 
 
-def test_integer_shares_leaves_residual_cash():
+def test_fractional_share_is_cashed_at_final_close_not_strike():
+    """條款：未足整股者「以期末評價日收盤價」折算現金，不是以執行價折算。
+
+    面額 100,000 / 執行價 84（= 105 x 80%）= 1190.476... 股，必產生零股。
+    """
     terms = base_terms(integer_shares=True)
     px, terms, sch = build(terms)
+    px.iloc[0, px.columns.get_loc("CCC")] = 105.0        # CCC 期初 105 -> 執行價 84
+    px.loc[sch.ki_days[30], "AAA"] = 55.0
+    px.loc[sch.final_valuation] = [95.0, 95.0, 50.0]     # CCC 期末 50，表現最差
+
+    out = evaluate(terms, px, sch)
+    assert out.delivered_symbol == "CCC"
+    assert out.delivery_price == pytest.approx(84.0)
+
+    exact = 100_000 / 84.0
+    assert out.shares == np.floor(exact)
+    assert exact - out.shares > 0                        # 確實有零股
+    # 零股以期末收盤 50 折現，而非以執行價 84
+    assert out.residual_cash == pytest.approx((exact - out.shares) * 50.0)
+    assert out.residual_cash != pytest.approx((exact - out.shares) * 84.0)
+
+
+def test_integer_and_fractional_settlement_give_same_value():
+    """零股以期末收盤價折現時，整股交割與零股交割的總價值完全相同。"""
+    px, base, sch = build(base_terms())
+    px.iloc[0, px.columns.get_loc("CCC")] = 105.0
     px.loc[sch.ki_days[30], "AAA"] = 55.0
     px.loc[sch.final_valuation] = [95.0, 95.0, 50.0]
 
-    out = evaluate(terms, px, sch)
-    assert out.shares == np.floor(100_000 / 80.0)
-    assert out.residual_cash == pytest.approx(100_000 - out.shares * 80.0)
-    assert out.shares * 80.0 + out.residual_cash == pytest.approx(100_000.0)
+    whole = evaluate(base_terms(integer_shares=True), px, sch)
+    frac = evaluate(base_terms(integer_shares=False), px, sch)
+
+    assert whole.shares != frac.shares
+    assert whole.total_value == pytest.approx(frac.total_value)
 
 
 def test_schedule_key_dates():

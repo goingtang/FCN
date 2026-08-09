@@ -82,6 +82,8 @@ class FCNTerms:
     lower_call_strike_pct: float | None = None              # Lower Call Strike 參與表現價
     participation: float = 1.00                             # 參與率（範例為 100%）
 
+    rebate: float = 0.0                                     # Rebate 行銷通路費（面額比例，一次性）
+
     # --- 非報價欄位，模型設定 ---
     notional: float = 100_000.0                             # 面額
     ko_lockout_months: int = 1                              # 發行日後幾個月才開始 KO 觀察
@@ -126,6 +128,29 @@ class FCNTerms:
                 )
             if self.participation <= 0:
                 raise ValueError("參與率須大於 0")
+        if self.rebate < 0:
+            raise ValueError("行銷通路費不可為負")
+
+    def check_platform_limits(self) -> list[str]:
+        """檢查是否落在詢價平台可受理的範圍內，回傳違反項目說明。
+
+        這是「平台收不收單」的限制，不是模型的數學限制；分析用途可以超出範圍，
+        但實際送出詢價前應先確認。
+        """
+        v: list[str] = []
+        if not 1 <= len(self.underlyings) <= 4:
+            v.append("連結標的須為 1~4 檔")
+        if not 2 <= self.tenor_months <= 12:
+            v.append(f"天期 {self.tenor_months}M 超出 2~12 個月")
+        if not 0.50 <= self.strike_pct <= 1.00:
+            v.append(f"執行價 {self.strike_pct:.2%} 超出 50%~100%")
+        if self.ko_type is not KOType.NONE and not 0.90 <= self.autocall_pct <= 1.20:
+            v.append(f"提前出場價 {self.autocall_pct:.2%} 超出 90%~120%")
+        if self.ki_type is not KIType.NONE and self.ki_pct is not None and self.ki_pct < 0.50:
+            v.append(f"下限價 {self.ki_pct:.2%} 低於 50%（若無下限請設為 NA）")
+        if self.rebate and not 0.002 <= self.rebate <= 0.03:
+            v.append(f"行銷通路費 {self.rebate:.2%} 超出 0.2%~3%")
+        return v
 
     @property
     def is_upside(self) -> bool:

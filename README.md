@@ -4,7 +4,8 @@
 把 **FCN（Fixed Coupon Note，固定配息提前出場境外結構型商品）** 的條款規則
 完整程式化，並串接 Yahoo Finance 實際美股報價，進行：
 
-1. **報價（quote）** — 反推公允年化配息率，檢驗券商報價是否合理
+1. **詢價（quote）** — 對報價單上留白的任一欄位求解（配息／執行價／下限價／
+   提前出場價／參與表現價／通路費），並檢驗券商報價是否合理
 2. **模擬（forecast）** — 真實機率測度下的損益分布與各情境機率
 3. **回測（backtest）** — 同一組條件套用到歷史上每個進場日的實際結果
 4. **逐筆判定（path）** — 單一進場日的記憶事件、KI 事件、期末比價明細
@@ -33,14 +34,32 @@ pip install numpy pandas pytest
 
 ## 快速開始
 
-### 反推公允配息率（Cpn p.a. 不是輸入值，是算出來的）
+### 詢價：欲詢價的欄位留白
+
+對應詢價平台「欲詢價參數請於該欄位留白」的操作。省略 `--coupon` 即為詢配息：
 
 ```bash
 python -m fcn.cli quote \
-    --ud "TSM UN" --ud "NVDA UW" --ud "MSFT UW" \
-    --tenor 12 --strike 80 --autocall 100 --ki 60 --ki-type AKI \
-    --coupon 12          # 選填：填入券商報價以比對價值差距
+    --ud "NVDA UW" --ud "TSM UN" --ud "AMD UW" \
+    --tenor 12 --strike 80 --autocall 100 --ki 75 --ki-type AKI --rebate 3
 ```
+
+改用 `--solve` 指定其他留白欄位（`coupon` / `rebate` / `strike` / `ki` /
+`autocall` / `lower-call`）：
+
+```bash
+# 已知配息 22%，反解券商該給的執行價
+python -m fcn.cli quote --ud "NVDA UW" --ud "TSM UN" --ud "AMD UW" \
+    --coupon 22 --solve strike --ki 75 --ki-type AKI --rebate 3
+
+# 已知全部條件，反解報價隱含的通路費空間
+python -m fcn.cli quote --ud "NVDA UW" --ud "TSM UN" --ud "AMD UW" \
+    --coupon 15 --solve rebate --strike 80 --ki 70 --ki-type AKI
+```
+
+`coupon` 與 `rebate` 有封閉解；其餘欄位以二分搜尋求解，並對所有候選值重用
+同一批隨機路徑（common random numbers），使目標函數平滑且結果可重現。
+若在合法區間內無解，會明確報告兩端的理論價值而非給出錯誤答案。
 
 輸出包含市場參數校準（波動度、相關矩陣、股息殖利率）、公允配息率、
 承接股票機率、以及報酬分布分位數。
@@ -124,6 +143,20 @@ CLI 參數與券商報價條件表一一對應：
 | KI Level 下限價 | `--ki` | 60 | % |
 | **Lower Call Strike 參與表現價** | `--lower-call` | 無 | % — 設定即成為 Upside FCN |
 | **參與率** | `--participation` | 100 | % |
+| **Rebate 行銷通路費** | `--rebate` | 0 | % — 一次性，由面額中先扣 |
+
+### 詢價平台可受理範圍
+
+| 欄位 | 範圍 |
+|---|---|
+| 連結標的 | 1~4 檔 |
+| 產品天期 | 2~12 個月 |
+| 執行價 | 50%~100% |
+| 提前出場價 | 90%~120% |
+| 下限價 | 不低於 50%（無下限則設 NA） |
+| 行銷通路費 | 0.2%~3% |
+
+超出範圍不會被程式擋下（分析用途仍可計算），但報表會標示 `⚠ 超出詢價平台可受理範圍`。
 
 支援的 Bloomberg 交易所代碼：`UN`/`UW`/`UQ`/`UA`/`US`（美國）、`TT`（台灣）、
 `TW`（櫃買）、`HK`（香港）、`JP`/`JT`（日本）、`SP`（新加坡）、`LN`（倫敦）、
@@ -199,14 +232,21 @@ dS_i / S_i = (r − q_i) dt + σ_i dW_i,    corr(dW_i, dW_j) = ρ_ij
 ```
 
 **提前出場與承接與否完全不受配息率影響**，因此票息腳的現值對配息率呈線性，
-無需疊代求根：
+無需疊代求根。投資人付出面額 100%，其中行銷通路費先被抽走：
 
 ```
-PV = PV_贖回 + c × A          A = 每單位配息率的年金現值
-令 PV = 面額（發行價 100%）  =>   c = (面額 − PV_贖回) / A
+PV_贖回 + c × A = 100% − Rebate        A = 每單位配息率的年金現值
+=>  c = (100% − Rebate − PV_贖回) / A
 ```
 
-`PricingResult.value_gap_pct` 給出券商報價相對公允價值的差距（負值 = 投資人吃虧）。
+報價的價值差距可以分解：
+
+| 數值 | 意義 |
+|---|---|
+| `pv_at_quote` | 以券商報價計算，投資人取得現金流的現值 |
+| `value_gap_pct` | `pv_at_quote − 100%`，負值 = 投資人吃虧 |
+| `implied_total_fee` | 報價隱含的總抽成（發行商利潤 + 通路費） |
+| `issuer_margin` | 扣掉報價單載明的通路費後，發行商保留的部分 |
 
 ---
 
@@ -217,13 +257,13 @@ fcn/
 ├── terms.py      報價條件（FCNTerms）與列舉型別
 ├── schedule.py   契約日程：交易日/發行日/KO・KI 觀察期間/配息日/期末評價日
 ├── engine.py     給付規則引擎（單一路徑，參考實作）
-├── mc.py         向量化蒙地卡羅：公允配息率反推 + 損益分布預測
+├── mc.py         向量化蒙地卡羅：留白欄位求解 + 公允定價 + 損益分布預測
 ├── backtest.py   歷史回測
 ├── data.py       Yahoo Finance 行情擷取 + Bloomberg 代碼對應
 ├── mktcal.py     NYSE 交易日曆
 ├── report.py     文字報表
 └── cli.py        命令列介面
-tests/            63 項測試
+tests/            89 項測試
 ```
 
 `engine.py`（可讀的單路徑實作）與 `mc.py`（向量化實作）在
@@ -242,5 +282,6 @@ python -m pytest tests/ -q
 與條款確認書為準。FCN 屬不保本商品，產品風險等級 RR4~RR5，僅限專業投資人投資。
 
 模型侷限：採用常數波動度的 GBM，未納入波動度微笑／傾斜、跳躍風險、
-發行商信用價差與各項費用，因此「公允配息率」是**理論上限的參考值**，
-實務報價必然低於此數；差距多寡才是有意義的比較基準。
+發行商信用價差，因此「公允配息率」是**理論上限的參考值**，實務報價必然低於
+此數；差距多寡才是有意義的比較基準。報價單上的行銷通路費（Rebate）已納入
+計算，但發行商本身的避險成本與利潤未單獨建模，會一併落在 `issuer_margin`。

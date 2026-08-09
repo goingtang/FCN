@@ -29,6 +29,16 @@ _KO_CHOICES = {k.value.lower(): k for k in KOType}
 _KI_CHOICES = {k.value.lower(): k for k in KIType} | {"na": KIType.NONE, "none": KIType.NONE}
 _FREQ_CHOICES = {k.value.lower(): k for k in CouponFreq}
 
+# --solve 的簡稱 -> FCNTerms 欄位名
+_SOLVE_FIELDS = {
+    "coupon": "coupon_pa",
+    "rebate": "rebate",
+    "strike": "strike_pct",
+    "ki": "ki_pct",
+    "autocall": "autocall_pct",
+    "lower-call": "lower_call_strike_pct",
+}
+
 
 def _add_terms_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("報價條件設定")
@@ -50,6 +60,8 @@ def _add_terms_args(p: argparse.ArgumentParser) -> None:
                    help="參與表現價 %%（Upside FCN 專屬，如 103）；省略則為一般 FCN")
     g.add_argument("--participation", type=float, default=100.0,
                    help="參與率 %%，預設 100")
+    g.add_argument("--rebate", type=float, default=0.0,
+                   help="行銷通路費 %%（平台範圍 0.2~3）")
     g.add_argument("--notional", type=float, default=100_000.0, help="面額，預設 100,000")
     g.add_argument("--lockout", type=int, default=1, help="KO 鎖定期（月），預設 1")
     g.add_argument("--tenor-from", default="trade", choices=["trade", "issue"],
@@ -85,6 +97,7 @@ def _build_terms(a: argparse.Namespace) -> FCNTerms:
         ki_pct=None if ki_type is KIType.NONE else a.ki / 100.0,
         lower_call_strike_pct=None if a.lower_call is None else a.lower_call / 100.0,
         participation=a.participation / 100.0,
+        rebate=a.rebate / 100.0,
         notional=a.notional,
         ko_lockout_months=a.lockout,
         tenor_from=a.tenor_from,
@@ -116,12 +129,27 @@ def cmd_quote(a: argparse.Namespace) -> int:
     mp.spot = md.closes[ysyms].iloc[-1].to_numpy(dtype=float)   # 障礙以未還原股息價為準
 
     trade_date = pd.Timestamp(a.asof) if a.asof else md.trading_days[-1]
-    pricing = mc.price(terms, mp, trade_date=trade_date, n_paths=a.paths)
 
-    used = terms if terms.coupon_pa is not None else terms.with_coupon(pricing.fair_coupon_pa)
+    # 詢價平台慣例：欲詢價的欄位留白。--solve 指定要解哪一欄；
+    # 未指定但 --coupon 留白時，預設求解年化配息。
+    field = _SOLVE_FIELDS.get(a.solve) if a.solve else ("coupon_pa" if a.coupon is None else None)
+
+    solved = None
+    used = terms
+    if field is not None:
+        try:
+            solved = mc.solve(
+                terms, mp, field=field, trade_date=trade_date, n_paths=a.solve_paths
+            )
+        except ValueError as exc:
+            raise SystemExit(f"詢價失敗：{exc}") from None
+        used = solved.terms
+
+    pricing = mc.price(used, mp, trade_date=trade_date, n_paths=a.paths)
     fc = mc.forecast(used, mp, trade_date=trade_date, n_paths=a.paths)
 
-    print(report.format_full_report(used, pricing.schedule, pricing=pricing, forecast=fc))
+    print(report.format_full_report(used, pricing.schedule, pricing=pricing, forecast=fc,
+                                    solve=solved))
     return 0
 
 
@@ -171,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
 
     q = sub.add_parser("quote", help="反推公允配息率 + 情境機率 + 損益分布預測")
     _add_terms_args(q)
+    q.add_argument("--solve", choices=sorted(_SOLVE_FIELDS), default=None,
+                   help="指定要詢價（留白）的欄位；預設為 coupon（當 --coupon 未給時）")
+    q.add_argument("--solve-paths", type=int, default=20_000, help="求解時的蒙地卡羅路徑數")
     q.add_argument("--paths", type=int, default=100_000, help="蒙地卡羅路徑數")
     q.add_argument("--lookback-years", type=float, default=2.0, help="波動/相關性校準回顧年數")
     q.add_argument("--rate", type=float, default=None, help="無風險利率 %%（省略則取 ^IRX）")

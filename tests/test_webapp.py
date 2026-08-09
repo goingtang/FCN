@@ -205,3 +205,40 @@ def test_payoff_curve_includes_upside_participation():
     pf = webapp._payoff_curve(t)
     top = max(pf["ki_hit"])
     assert top > pf["coupon_total"], "Upside FCN 的報酬應可突破配息上限"
+
+
+# --------------------------------------------------------------------------
+# 服務啟動
+# --------------------------------------------------------------------------
+
+
+def test_lan_address_is_resolvable():
+    addr = webapp._lan_address()
+    assert addr and addr.count(".") == 3
+
+
+@pytest.mark.parametrize(
+    "host,public",
+    [("127.0.0.1", False), ("localhost", False), ("LOCALHOST", False),
+     ("::1", False), (" 127.0.0.1 ", False),
+     ("0.0.0.0", True), ("192.168.1.10", True), ("::", True)],
+)
+def test_public_bind_detection(host, public):
+    assert webapp.is_public_bind(host) is public
+
+
+def test_public_bind_prints_security_warning(monkeypatch, capsys):
+    """綁到非本機位址時必須提醒服務沒有帳密也沒有 TLS。"""
+    class _Fake:
+        def __init__(self, *a, **k): pass
+        def serve_forever(self): raise KeyboardInterrupt
+        def server_close(self): pass
+
+    monkeypatch.setattr(webapp, "ThreadingHTTPServer", _Fake)
+
+    webapp.serve("0.0.0.0", 8000)
+    out = capsys.readouterr().out
+    assert "⚠" in out and "沒有帳號密碼" in out
+
+    webapp.serve("127.0.0.1", 8000)
+    assert "⚠" not in capsys.readouterr().out

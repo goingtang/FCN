@@ -668,10 +668,43 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
 
+def _lan_address() -> str:
+    """取得本機在區域網路上的位址（純查詢，不會真的送出封包）。"""
+    import socket
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        return s.getsockname()[0]
+    except OSError:
+        return socket.gethostbyname(socket.gethostname())
+    finally:
+        s.close()
+
+
+_LOOPBACK = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
+
+
+def is_public_bind(host: str) -> bool:
+    """綁定位址是否會讓本機以外的人連得到。"""
+    return host.strip().lower() not in _LOOPBACK
+
+
 def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
     httpd = ThreadingHTTPServer((host, port), Handler)
-    shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
-    print(f"FCN 詢價平台已啟動 →  http://{shown}:{port}")
+
+    if is_public_bind(host):
+        try:
+            shown = _lan_address()
+        except Exception:  # noqa: BLE001 - 取不到就退回使用者輸入的位址
+            shown = host
+        print(f"FCN 詢價平台已啟動 →  http://{shown}:{port}")
+        print(
+            "⚠ 已對外開放：本服務沒有帳號密碼也沒有 TLS，僅適合可信任的內部網路。\n"
+            "  請確認未經由防火牆或 NAT 暴露到網際網路。"
+        )
+    else:
+        print(f"FCN 詢價平台已啟動 →  http://{host}:{port}")
     print("按 Ctrl+C 結束")
     try:
         httpd.serve_forever()

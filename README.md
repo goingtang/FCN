@@ -61,6 +61,63 @@ python -m fcn.webapp --port 9000 --host 0.0.0.0
 
 圖表為原生 SVG，不依賴任何前端函式庫，並支援深色模式。
 
+### 開放給內網同事使用
+
+預設只綁 `127.0.0.1`，僅本機可連。要讓同一區域網路的同事使用，綁到所有介面：
+
+```bash
+python -m fcn.cli serve --host 0.0.0.0 --port 8000
+```
+
+啟動時會直接印出可分享的網址與警告：
+
+```
+FCN 詢價平台已啟動 →  http://192.168.1.23:8000
+⚠ 已對外開放：本服務沒有帳號密碼也沒有 TLS，僅適合可信任的內部網路。
+  請確認未經由防火牆或 NAT 暴露到網際網路。
+```
+
+**這個警告是認真的。** 本服務刻意保持精簡，沒有帳號密碼、沒有 TLS、沒有速率限制，
+只適合放在可信任的內部網路。不要做通訊埠轉發、不要放到公開雲主機。
+若確實需要對外，請放在有身分驗證的反向代理（nginx / Caddy）之後。
+
+背景常駐執行：
+
+```bash
+nohup python -m fcn.cli serve --host 0.0.0.0 --port 8000 > fcn-web.log 2>&1 &
+```
+
+或用 systemd（Linux）：
+
+```ini
+# /etc/systemd/system/fcn-web.service
+[Unit]
+Description=FCN 詢價平台
+After=network.target
+
+[Service]
+User=fcn
+WorkingDirectory=/opt/FCN
+ExecStart=/usr/bin/python3 -m fcn.cli serve --host 0.0.0.0 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now fcn-web
+```
+
+#### 多人同時使用的注意事項
+
+| 項目 | 說明 |
+|---|---|
+| **並行能力** | 蒙地卡羅是 CPU 密集運算。實測 40,000 條路徑約 5~6 秒；同時 3~5 人使用尚可，再多就會明顯排隊。人多時可把預設路徑數調到 20,000。 |
+| **Yahoo 流量限制** | 所有人共用同一組對外 IP。行情已在記憶體中快取（同一組標的與日期區間只抓一次），但短時間大量查驗不同標的仍可能被暫時擋下（HTTP 429）。 |
+| **磁碟快取** | `.cache/` 會累積行情 JSON，可隨時整個刪除，下次會自動重抓。 |
+| **無狀態** | 服務不保存任何使用者資料，重啟即可，不需備份。 |
+
 ---
 
 ## 快速開始（命令列）
@@ -334,7 +391,7 @@ fcn/
 ├── cli.py        命令列介面
 ├── webapp.py     網頁介面（http.server + JSON API）
 └── web/          前端（index.html / style.css / app.js，原生 SVG 繪圖）
-tests/            142 項測試
+tests/            152 項測試
 ```
 
 `engine.py`（可讀的單路徑實作）與 `mc.py`（向量化實作）在

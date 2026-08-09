@@ -136,7 +136,7 @@ table.rfq td {
 }
 table.rfq input, table.rfq select {
   width: 100%;
-  min-width: 62px;
+  min-width: 56px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--ink);
@@ -145,7 +145,9 @@ table.rfq input, table.rfq select {
   padding: 5px 2px;
   border-radius: 4px;
 }
-table.rfq select { min-width: 90px; }
+/* 代碼欄要放得下 "NVDA UW"，選單要放得下 "Daily Memory"，數字欄則可以窄一些 */
+#f-ud1, #f-ud2, #f-ud3, #f-ud4 { min-width: 78px; }
+table.rfq select { min-width: 104px; }
 table.rfq input:hover, table.rfq select:hover { border-color: var(--line); }
 table.rfq input:focus, table.rfq select:focus {
   outline: none;
@@ -164,6 +166,32 @@ table.rfq td.na { background: var(--line-2); color: var(--ink-3); font-size: 12p
   margin: 0 0 14px;
 }
 .hint b { color: var(--accent); }
+
+.state {
+  font-size: 12.5px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+.state.plain { background: var(--panel-2); border-color: var(--line); color: var(--ink-2); }
+.state.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.state b { font-weight: 600; }
+
+.tickers { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tk {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 11px;
+  background: var(--panel-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.tk.bad { border-color: var(--bad); background: var(--bad-soft); color: var(--bad); }
+.tk .sym { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+.tk .meta { color: var(--ink-2); font-size: 11.5px; }
 
 .opts { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
 .opt { display: flex; flex-direction: column; gap: 3px; }

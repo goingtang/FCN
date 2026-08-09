@@ -77,6 +77,7 @@ class Bars:
     dividends: pd.Series      # 各除息日的現金股息
     currency: str
     exchange: str
+    name: str = ""            # 公司/基金全名
 
 
 def _http_get(url: str, timeout: int = 30, retries: int = 4) -> bytes:
@@ -190,6 +191,7 @@ def fetch_bars(
         dividends=dividends,
         currency=meta.get("currency", "USD"),
         exchange=meta.get("fullExchangeName", ""),
+        name=meta.get("longName") or meta.get("shortName") or "",
     )
 
 

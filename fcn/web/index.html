@@ -28,7 +28,42 @@
   <p class="hint">
     對應詢價平台操作：<b>欲詢價的參數請將該欄位留白</b>（一次僅能留白一欄）。
     百分比欄位直接填數字，例如執行價填 <code>80</code> 代表 80%。
+    <br>
+    連結標的可填 Bloomberg 代碼（<code>TSM UN</code>）或 Yahoo 代碼（<code>TSM</code>）；
+    輸入框有常用標的建議，也可自行輸入任意代碼。
   </p>
+
+  <datalist id="ticker-list">
+    <option value="NVDA UW" label="輝達 NVIDIA"></option>
+    <option value="TSM UN" label="台積電 ADR"></option>
+    <option value="AMD UW" label="超微 AMD"></option>
+    <option value="MSFT UW" label="微軟 Microsoft"></option>
+    <option value="AAPL UW" label="蘋果 Apple"></option>
+    <option value="GOOGL UW" label="Alphabet"></option>
+    <option value="AMZN UW" label="亞馬遜 Amazon"></option>
+    <option value="META UW" label="Meta"></option>
+    <option value="TSLA UW" label="特斯拉 Tesla"></option>
+    <option value="AVGO UW" label="博通 Broadcom"></option>
+    <option value="MU UW" label="美光 Micron"></option>
+    <option value="INTC UW" label="英特爾 Intel"></option>
+    <option value="QCOM UW" label="高通 Qualcomm"></option>
+    <option value="ASML UW" label="艾司摩爾 ASML"></option>
+    <option value="ARM UW" label="安謀 Arm"></option>
+    <option value="COIN UW" label="Coinbase"></option>
+    <option value="PLTR UW" label="Palantir"></option>
+    <option value="NFLX UW" label="Netflix"></option>
+    <option value="JPM UN" label="摩根大通"></option>
+    <option value="BRK/B UN" label="波克夏 B"></option>
+    <option value="QQQ UW" label="ETF 那斯達克 100"></option>
+    <option value="SPY UN" label="ETF S&amp;P 500"></option>
+    <option value="SOXX UW" label="ETF 費城半導體"></option>
+    <option value="2330 TT" label="台積電（台股）"></option>
+    <option value="2317 TT" label="鴻海"></option>
+    <option value="0050 TT" label="元大台灣50"></option>
+    <option value="700 HK" label="騰訊"></option>
+    <option value="9988 HK" label="阿里巴巴"></option>
+    <option value="7203 JP" label="豐田"></option>
+  </datalist>
 
   <div class="sheet">
     <table class="rfq">
@@ -59,13 +94,14 @@
             <option value="fcn">FCN</option>
             <option value="upside">Upside FCN</option>
           </select></td>
-          <td><input id="f-ud1" value="TSM UN" placeholder="TSM UN"></td>
-          <td><input id="f-ud2" value="NVDA UW"></td>
-          <td><input id="f-ud3" value="MSFT UW"></td>
-          <td><input id="f-ud4" placeholder="—"></td>
+          <td><input id="f-ud1" value="TSM UN" list="ticker-list" placeholder="TSM UN"></td>
+          <td><input id="f-ud2" value="NVDA UW" list="ticker-list"></td>
+          <td><input id="f-ud3" value="MSFT UW" list="ticker-list"></td>
+          <td><input id="f-ud4" list="ticker-list" placeholder="—"></td>
           <td><input id="f-ccy" value="USD"></td>
           <td><input id="f-tenor" value="12" inputmode="numeric"></td>
-          <td><input id="f-coupon" placeholder="留白詢價" inputmode="decimal"></td>
+          <td><input id="f-coupon" placeholder="系統試算" inputmode="decimal"
+                     title="留白＝由系統試算公允配息率；也可直接填入券商報價"></td>
           <td><input id="f-idelay" value="5" inputmode="numeric"></td>
           <td><select id="f-freq">
             <option>Monthly</option><option>Quarterly</option>
@@ -87,6 +123,9 @@
       </tbody>
     </table>
   </div>
+
+  <div id="solve-state" class="state"></div>
+  <div id="ticker-state"></div>
 
   <div class="opts">
     <div class="opt"><label>面額 Notional</label>
@@ -114,6 +153,8 @@
 
   <div class="actions">
     <button class="go" id="btn-quote">執行詢價與模擬</button>
+    <button class="ghost" id="btn-check">查驗標的代碼</button>
+    <button class="ghost" id="btn-clear-coupon">配息改由系統試算</button>
     <button class="ghost" id="btn-preset-fcn">載入 FCN 範例</button>
     <button class="ghost" id="btn-preset-upside">載入 Upside FCN 範例</button>
     <span class="status" id="status-quote"></span>

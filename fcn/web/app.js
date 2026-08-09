@@ -320,10 +320,38 @@ function syncForm() {
 
 const BLANKABLE = ['f-coupon', 'f-strike', 'f-autocall', 'f-ki', 'f-rebate', 'f-lowercall'];
 
+const FIELD_LABELS = {
+  'f-coupon': '年化配息 (Cpn p.a.)',
+  'f-strike': '執行價 (Put Strike)',
+  'f-autocall': '提前出場價 (Autocall)',
+  'f-ki': '下限價 (KI Level)',
+  'f-rebate': '行銷通路費 (Rebate)',
+  'f-lowercall': '參與表現價 (Lower Call Strike)',
+};
+
 function markBlanks() {
+  const blanks = [];
   for (const id of BLANKABLE) {
     const n = $(id);
-    if (n) n.classList.toggle('blank', !n.value.trim());
+    if (!n) continue;
+    const empty = !n.value.trim();
+    n.classList.toggle('blank', empty);
+    if (empty) blanks.push(id);
+  }
+
+  const s = $('solve-state');
+  if (!s) return;
+  if (blanks.length === 0) {
+    s.className = 'state plain';
+    s.innerHTML = '所有欄位皆已填寫 —— 直接以此條件定價，並比對報價是否合理。'
+      + '若要讓系統試算年化配息，把 <b>Cpn p.a.</b> 欄位清空即可。';
+  } else if (blanks.length === 1) {
+    s.className = 'state';
+    s.innerHTML = `留白詢價欄位：<b>${FIELD_LABELS[blanks[0]]}</b> —— 送出後由系統試算此欄位。`;
+  } else {
+    s.className = 'state bad';
+    s.innerHTML = '一次只能留白一個欄位詢價，目前留白：<b>'
+      + blanks.map((b) => FIELD_LABELS[b]).join('、') + '</b>';
   }
 }
 
@@ -729,6 +757,37 @@ document.querySelectorAll('nav button').forEach((b) => {
 $('f-product').addEventListener('change', syncForm);
 $('f-kitype').addEventListener('change', syncForm);
 BLANKABLE.forEach((id) => { const n = $(id); if (n) n.addEventListener('input', markBlanks); });
+
+function renderTickers(d) {
+  const box = $('ticker-state');
+  const cards = d.tickers.map((t) => t.ok
+    ? el('div', { class: 'tk' },
+      el('div', {}, el('span', { class: 'sym' }, t.symbol),
+        ' ', t.name || '', ' ', el('span', { class: 'meta' }, `(${t.input})`)),
+      el('div', { class: 'meta' },
+        `${t.currency} ${num(t.last)} @ ${t.last_date}｜${t.exchange}`
+        + `｜資料自 ${t.first_date}（${t.n_days.toLocaleString()} 個交易日）`))
+    : el('div', { class: 'tk bad' },
+      el('div', {}, el('span', { class: 'sym' }, t.input), ' 查無此標的'),
+      el('div', { class: 'meta' }, t.error)));
+
+  box.replaceChildren(
+    el('div', { class: 'tickers' }, cards),
+    ...(d.warnings || []).map((w) => el('div', { class: 'state bad' }, w)));
+}
+
+$('btn-check').addEventListener('click', async (e) => {
+  const uds = ['f-ud1', 'f-ud2', 'f-ud3', 'f-ud4']
+    .map((i) => $(i).value.trim()).filter(Boolean);
+  const d = await call('/api/tickers', { underlyings: uds }, e.target, 'status-quote', '查驗');
+  if (d) renderTickers(d);
+});
+
+$('btn-clear-coupon').addEventListener('click', () => {
+  $('f-coupon').value = '';
+  markBlanks();
+  $('f-coupon').focus();
+});
 
 $('btn-quote').addEventListener('click', async (e) => {
   const d = await call('/api/quote', payload(), e.target, 'status-quote', '詢價');

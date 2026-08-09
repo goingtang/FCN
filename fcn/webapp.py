@@ -24,7 +24,7 @@ import pandas as pd
 
 from . import mc
 from .backtest import run_backtest
-from .data import fetch_risk_free_rate, load_market_data
+from .data import fetch_bars, fetch_risk_free_rate, load_market_data
 from .engine import Scenario, evaluate
 from .schedule import build_schedule
 from .terms import AutocallCoupon, CouponFreq, FCNTerms, KIType, KOType
@@ -536,10 +536,56 @@ def api_path(payload: dict) -> dict:
     }
 
 
+def api_tickers(payload: dict) -> dict:
+    """查驗標的代碼：解析成 Yahoo 代碼並回報名稱、幣別、最新價與可用資料區間。"""
+    raws = [str(u).strip() for u in payload.get("underlyings", []) if str(u).strip()]
+    if not raws:
+        raise ApiError("請至少輸入一檔標的")
+    if len(raws) > 4:
+        raise ApiError("最多 4 檔連結標的")
+
+    end = pd.Timestamp.today().normalize()
+    out = []
+    for raw in raws:
+        try:
+            bar = fetch_bars(raw, end - pd.DateOffset(years=8), end)
+        except Exception as exc:  # noqa: BLE001 - 逐檔回報，不讓一檔失敗拖垮整批
+            out.append({"input": raw, "ok": False, "error": str(exc)})
+            continue
+        out.append({
+            "input": raw,
+            "ok": True,
+            "symbol": bar.symbol,
+            "name": bar.name,
+            "currency": bar.currency,
+            "exchange": bar.exchange,
+            "last": float(bar.close.iloc[-1]),
+            "last_date": str(bar.close.index[-1].date()),
+            "first_date": str(bar.close.index[0].date()),
+            "n_days": int(len(bar.close)),
+        })
+
+    ccys = {r["currency"] for r in out if r.get("ok")}
+    warnings = []
+    if len(ccys) > 1:
+        warnings.append(
+            f"連結標的橫跨多種幣別（{'、'.join(sorted(ccys))}）；"
+            "本模型未處理匯率轉換，請確認商品是否為 Quanto 結構"
+        )
+    exchanges = {r["exchange"] for r in out if r.get("ok")}
+    if len({e.split()[0] for e in exchanges if e}) > 1:
+        warnings.append(
+            "連結標的分屬不同交易所，觀察日將取各標的交易日的交集，"
+            "實際商品的『預定交易日』定義請以條款為準"
+        )
+    return {"tickers": out, "warnings": warnings}
+
+
 _ROUTES = {
     "/api/quote": api_quote,
     "/api/backtest": api_backtest,
     "/api/path": api_path,
+    "/api/tickers": api_tickers,
 }
 
 

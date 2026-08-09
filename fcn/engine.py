@@ -41,6 +41,43 @@ class Scenario(str, Enum):
 
 
 @dataclass
+class BarrierLevels:
+    """Term Sheet 載明的絕對價位。
+
+    真實條款確認書會寫死每檔標的的期初定價、提前出場價、執行價與下限價，
+    且多半經過四捨五入，未必等於「期初價 x 百分比」。未提供的欄位才回頭
+    以百分比推算。
+    """
+
+    initial: dict[str, float]
+    ko: dict[str, float] | None = None
+    strike: dict[str, float] | None = None
+    ki: dict[str, float] | None = None
+
+    def resolve(self, terms: FCNTerms, symbols: list[str]) -> dict[str, pd.Series]:
+        missing = [s for s in symbols if s not in self.initial]
+        if missing:
+            raise ValueError(f"Term Sheet 缺少期初價：{', '.join(missing)}")
+
+        init = pd.Series({s: float(self.initial[s]) for s in symbols}, dtype=float)
+
+        def pick(given: dict[str, float] | None, pctage: float | None) -> pd.Series | None:
+            if given is not None:
+                gap = [s for s in symbols if s not in given]
+                if gap:
+                    raise ValueError(f"Term Sheet 價位不完整，缺少：{', '.join(gap)}")
+                return pd.Series({s: float(given[s]) for s in symbols}, dtype=float)
+            return None if pctage is None else init * pctage
+
+        return {
+            "initial": init,
+            "ko": pick(self.ko, terms.autocall_pct),
+            "strike": pick(self.strike, terms.strike_pct),
+            "ki": pick(self.ki, terms.ki_pct if terms.ki_type is not KIType.NONE else None),
+        }
+
+
+@dataclass
 class FCNOutcome:
     """單一路徑的完整給付結果。"""
 
@@ -133,22 +170,34 @@ def _accrued_coupon(
     return paid
 
 
-def evaluate(terms: FCNTerms, closes: pd.DataFrame, schedule: Schedule) -> FCNOutcome:
+def evaluate(
+    terms: FCNTerms,
+    closes: pd.DataFrame,
+    schedule: Schedule,
+    levels: BarrierLevels | None = None,
+) -> FCNOutcome:
     """對一條實際（或模擬）價格路徑求算 FCN 給付結果。
 
     ``closes`` 需為 index=交易日、columns=標的的未還原股息收盤價，且涵蓋
     ``schedule.trade_date`` ~ ``schedule.final_valuation``。
+
+    ``levels`` 用於重現真實 Term Sheet：給定後即採用文件載明的絕對價位，
+    不再以交易日收盤價乘上百分比推算。
     """
     if terms.coupon_pa is None:
-        raise ValueError("terms.coupon_pa 未設定；請先用 pricing.solve_fair_coupon() 求解")
+        raise ValueError("terms.coupon_pa 未設定；請先用 mc.price() 或 mc.solve() 求解")
 
     syms = list(closes.columns)
     warnings: list[str] = []
 
-    initial = closes.loc[schedule.trade_date].astype(float)
-    ko_levels = initial * terms.autocall_pct
-    strike_levels = initial * terms.strike_pct
-    ki_levels = initial * terms.ki_pct if terms.ki_type is not KIType.NONE else None
+    if levels is None:
+        initial = closes.loc[schedule.trade_date].astype(float)
+        ko_levels = initial * terms.autocall_pct
+        strike_levels = initial * terms.strike_pct
+        ki_levels = initial * terms.ki_pct if terms.ki_type is not KIType.NONE else None
+    else:
+        r = levels.resolve(terms, syms)
+        initial, ko_levels, strike_levels, ki_levels = r["initial"], r["ko"], r["strike"], r["ki"]
 
     # ---------- ① 記憶事件 / ② 提前出場 ----------
     memory_dates: dict[str, pd.Timestamp | None] = {s: None for s in syms}
@@ -263,7 +312,7 @@ def evaluate(terms: FCNTerms, closes: pd.DataFrame, schedule: Schedule) -> FCNOu
         )
 
     # ⑤ 承接表現最差標的
-    delivery_price = float(initial[worst_symbol] * terms.strike_pct)
+    delivery_price = float(strike_levels[worst_symbol])
     final_worst = float(final_all[worst_symbol])
     exact = terms.notional / delivery_price
     if terms.integer_shares:

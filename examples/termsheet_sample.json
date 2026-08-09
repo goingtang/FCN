@@ -1,0 +1,40 @@
+{
+  "label": "格式範例（非真實券商文件）：2021-12-27 發行、連結 TSM/NVDA/MSFT 的 12 個月 FCN。NVDA 於 2024-06 一拆十，故此處價位為分割前的原始尺度，用以示範對帳工具的分割偵測。",
+
+  "trade_date": "2021-12-27",
+
+  "terms": {
+    "underlyings": ["TSM UN", "NVDA UW", "MSFT UW"],
+    "currency": "USD",
+    "tenor_months": 12,
+    "coupon_pa": 12,
+    "issue_delay_bd": 5,
+    "coupon_freq": "Monthly",
+    "strike_pct": 80,
+    "ko_type": "Daily Memory",
+    "autocall_pct": 100,
+    "ki_type": "AKI",
+    "ki_pct": 60,
+    "ko_lockout_months": 1,
+    "notional": 100000,
+    "rebate": 0,
+    "integer_shares": true,
+    "autocall_coupon": "accrued"
+  },
+
+  "levels": {
+    "initial": { "TSM UN": 122.70, "NVDA UW": 309.45, "MSFT UW": 342.45 },
+    "ko":      { "TSM UN": 122.70, "NVDA UW": 309.45, "MSFT UW": 342.45 },
+    "strike":  { "TSM UN": 98.16,  "NVDA UW": 247.56, "MSFT UW": 273.96 },
+    "ki":      { "TSM UN": 73.62,  "NVDA UW": 185.67, "MSFT UW": 205.47 }
+  },
+
+  "expected": {
+    "scenario": "到期承接股票",
+    "exit_date": "2022-12-27",
+    "coupon_total": 12000,
+    "delivered_symbol": "NVDA",
+    "delivery_price": 247.56,
+    "shares": 403
+  }
+}

@@ -9,6 +9,7 @@
 2. **模擬（forecast）** — 真實機率測度下的損益分布與各情境機率
 3. **回測（backtest）** — 同一組條件套用到歷史上每個進場日的實際結果
 4. **逐筆判定（path）** — 單一進場日的記憶事件、KI 事件、期末比價明細
+5. **對帳（reconcile）** — 拿真實 Term Sheet 逐項驗證模型結果
 
 全部功能都有網頁介面（無額外相依，標準函式庫實作）。
 
@@ -103,6 +104,43 @@ python -m fcn.cli backtest \
     --ud "TSM UN" --ud "NVDA UW" --ud "MSFT UW" \
     --coupon 12 --years 6 --step 5 --csv out.csv
 ```
+
+### 以真實 Term Sheet 對帳
+
+把條款確認書的內容填成 JSON（格式見 `examples/termsheet_sample.json`），
+逐項比對模型結果與文件記載：
+
+```bash
+python -m fcn.cli reconcile examples/termsheet_sample.json
+```
+
+```
+  項目                     Term Sheet          模型   結果
+  價格尺度 NVDA                   x10           x10   PASS
+  期初價 NVDA                309.4500      309.4500   PASS
+  情境                       到期承接股票      到期承接股票   PASS
+  承接價                      247.5600      247.5600   PASS
+  承接股數                     403.0000      403.0000   PASS
+  比對 13 項，13 項相符，全部通過 ✓
+```
+
+`levels` 區塊填文件載明的**絕對價位**，優先於「期初價 × 百分比」——
+真實條款的執行價與下限價多半經過四捨五入。`expected` 區塊填已知的實際結果，
+可只填其中幾項；未填的項目會標示為「—」而不參與判定。
+未通過時 exit code 為 1，方便接進 CI。
+
+#### 股票分割
+
+Yahoo 的收盤價已還原分割，但 Term Sheet 記載的是發行當時的原始報價。
+工具會比對兩者推得倍數，若落在實際存在的分割比例上（1、10、3/2、1/3 …）
+就把**行情序列還原成文件的價格尺度**再計算。
+
+方向不能反過來：整股交割是在原始價格上取整的，
+`floor(100,000 / 247.56) = 403` 股與 `floor(100,000 / 24.756) = 4,039` 股
+並非 10 倍關係，換算錯邊會算出不同的零股找補與總價值。
+
+倍數若不是乾淨的分割比例（例如相差 3.7%），工具**不會**自動縮放，
+而是讓期初價比對把差異顯示出來 —— 那通常代表交易日填錯或標的代碼有誤。
 
 ### 單一進場日的逐項判定
 
@@ -283,11 +321,12 @@ fcn/
 ├── backtest.py   歷史回測
 ├── data.py       Yahoo Finance 行情擷取 + Bloomberg 代碼對應
 ├── mktcal.py     NYSE 交易日曆
+├── reconcile.py  Term Sheet 對帳（絕對價位 + 分割偵測）
 ├── report.py     文字報表
 ├── cli.py        命令列介面
 ├── webapp.py     網頁介面（http.server + JSON API）
 └── web/          前端（index.html / style.css / app.js，原生 SVG 繪圖）
-tests/            117 項測試
+tests/            136 項測試
 ```
 
 `engine.py`（可讀的單路徑實作）與 `mc.py`（向量化實作）在

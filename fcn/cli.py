@@ -204,6 +204,18 @@ def cmd_path(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile(a: argparse.Namespace) -> int:
+    from .reconcile import TermSheet, format_reconciliation, reconcile
+
+    sheet = TermSheet.from_json(a.spec)
+    try:
+        rec = reconcile(sheet, auto_adjust_splits=not a.no_split_adjust)
+    except ValueError as exc:
+        raise SystemExit(f"對帳失敗：{exc}") from None
+    print(format_reconciliation(rec))
+    return 0 if rec.passed else 1
+
+
 def cmd_serve(a: argparse.Namespace) -> int:
     from .webapp import serve
 
@@ -243,6 +255,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--trade-date", required=True, help="交易日 YYYY-MM-DD")
     s.add_argument("--end", default=None, help="行情擷取截止日")
     s.set_defaults(func=cmd_path)
+
+    rc = sub.add_parser("reconcile", help="以真實 Term Sheet 對帳")
+    rc.add_argument("spec", help="Term Sheet JSON 檔路徑")
+    rc.add_argument("--no-split-adjust", action="store_true",
+                    help="不自動換算股票分割倍數（預設會換算）")
+    rc.set_defaults(func=cmd_reconcile)
 
     w = sub.add_parser("serve", help="啟動網頁介面")
     w.add_argument("--host", default="127.0.0.1")

@@ -183,7 +183,144 @@ function lineChart(opts) {
     x1: pad.l, x2: W - pad.r, y1: pad.t + ih, y2: pad.t + ih, stroke: ink3,
   }));
 
+  attachCrosshair(g, {
+    pad, iw, ih, W, X, Y, x0, x1, y0, y1,
+    series: opts.series,
+    // 座標軸標籤求簡潔，十字線查價則求精確，因此可分別指定格式
+    xFmt: opts.hoverXFmt || opts.xFmt || num,
+    yFmt: opts.hoverYFmt || opts.yFmt || num,
+  });
+
   return el('div', { class: 'chart' }, g);
+}
+
+/** 在資料點陣列中找出最接近 x 的索引（points 依 x 遞增）。 */
+function nearestIndex(points, x) {
+  let lo = 0, hi = points.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid][0] <= x) lo = mid; else hi = mid;
+  }
+  return Math.abs(points[lo][0] - x) <= Math.abs(points[hi][0] - x) ? lo : hi;
+}
+
+/**
+ * 十字線查價：游標移動時鎖定最接近的 x，於各條線上標點並列出數值。
+ */
+function attachCrosshair(g, o) {
+  const { pad, iw, ih, W, X, Y, x0, x1, series, xFmt, yFmt } = o;
+  const live = series.filter((s) => s.points && s.points.length > 1);
+  if (!live.length) return;
+
+  const ink = css('--ink'), ink2 = css('--ink-2'), ink3 = css('--ink-3');
+  const panel = css('--panel'), line = css('--line');
+
+  const layer = svg('g', { style: 'pointer-events:none', visibility: 'hidden' });
+  const vline = svg('line', {
+    y1: pad.t, y2: pad.t + ih, stroke: ink3, 'stroke-width': 1, 'stroke-dasharray': '3 3',
+  });
+  const hline = svg('line', {
+    x1: pad.l, x2: W - pad.r, stroke: ink3, 'stroke-width': 1, 'stroke-dasharray': '3 3',
+  });
+  layer.append(vline, hline);
+
+  // 游標高度對應的 Y 軸讀值
+  const yTagBg = svg('rect', { fill: ink3, rx: 3, height: 15, width: 52 });
+  const yTag = svg('text', { 'font-size': 11, fill: panel, 'text-anchor': 'end' });
+  layer.append(yTagBg, yTag);
+
+  const dots = live.map((s) => svg('circle', {
+    r: 4.5, fill: s.color, stroke: panel, 'stroke-width': 1.5,
+  }));
+  dots.forEach((d) => layer.append(d));
+
+  const box = svg('rect', { fill: panel, stroke: line, 'stroke-width': 1, rx: 5, opacity: .97 });
+  layer.append(box);
+  const header = svg('text', { 'font-size': 11.5, fill: ink2, 'font-weight': 600 });
+  layer.append(header);
+  const swatches = live.map((s) => svg('rect', { width: 9, height: 3, rx: 1.5, fill: s.color }));
+  const rows = live.map(() => svg('text', { 'font-size': 11.5, fill: ink }));
+  swatches.forEach((s) => layer.append(s));
+  rows.forEach((r) => layer.append(r));
+
+  g.append(layer);
+
+  // 透明感應區疊在最上層；layer 設了 pointer-events:none 所以不會擋住事件
+  const hit = svg('rect', {
+    x: pad.l, y: pad.t, width: iw, height: ih, fill: 'transparent',
+    style: 'cursor:crosshair; touch-action:none',
+  });
+  g.append(hit);
+
+  const toLocal = (ev) => {
+    const m = g.getScreenCTM();
+    if (!m) return null;
+    const p = g.createSVGPoint();
+    p.x = ev.clientX; p.y = ev.clientY;
+    return p.matrixTransform(m.inverse());
+  };
+
+  function move(ev) {
+    const loc = toLocal(ev);
+    if (!loc) return;
+    const cx = Math.min(Math.max(loc.x, pad.l), pad.l + iw);
+    const cy = Math.min(Math.max(loc.y, pad.t), pad.t + ih);
+    const xval = x0 + ((cx - pad.l) / iw) * (x1 - x0);
+
+    // 以第一條線的取樣點為準鎖定 x，各線再取同一個 x 的最近點
+    const anchor = live[0].points[nearestIndex(live[0].points, xval)][0];
+    const px = X(anchor);
+    vline.setAttribute('x1', px); vline.setAttribute('x2', px);
+    hline.setAttribute('y1', cy); hline.setAttribute('y2', cy);
+
+    yTagBg.setAttribute('x', pad.l - 56);
+    yTagBg.setAttribute('y', cy - 7.5);
+    yTag.setAttribute('x', pad.l - 8);
+    yTag.setAttribute('y', cy + 4);
+    yTag.textContent = yFmt(o.y0 + ((pad.t + ih - cy) / ih) * (o.y1 - o.y0));
+
+    const vals = live.map((s) => {
+      const i = nearestIndex(s.points, anchor);
+      return s.points[i][1];
+    });
+    live.forEach((s, i) => {
+      const d = dots[i];
+      d.setAttribute('cx', px);
+      d.setAttribute('cy', Y(vals[i]));
+    });
+
+    header.textContent = xFmt(anchor);
+    live.forEach((s, i) => {
+      rows[i].textContent = `${s.name}　${(s.hoverFmt || yFmt)(vals[i])}`;
+    });
+
+    // 首次顯示後才量得到文字寬度（SVG 需已在 DOM 中）
+    const widths = [header.getComputedTextLength(),
+      ...rows.map((r) => r.getComputedTextLength() + 14)];
+    const bw = Math.max(...widths) + 22;      // 左右內距
+    const bh = 20 + live.length * 16 + 8;
+
+    const right = px + 14 + bw <= W - pad.r;
+    const bx = right ? px + 14 : px - 14 - bw;
+    const by = Math.min(Math.max(cy - bh / 2, pad.t + 2), pad.t + ih - bh - 2);
+
+    box.setAttribute('x', bx); box.setAttribute('y', by);
+    box.setAttribute('width', bw); box.setAttribute('height', bh);
+    header.setAttribute('x', bx + 10); header.setAttribute('y', by + 15);
+    live.forEach((s, i) => {
+      const ty = by + 33 + i * 16;
+      swatches[i].setAttribute('x', bx + 10);
+      swatches[i].setAttribute('y', ty - 4);
+      rows[i].setAttribute('x', bx + 24);
+      rows[i].setAttribute('y', ty);
+    });
+
+    layer.setAttribute('visibility', 'visible');
+  }
+
+  hit.addEventListener('pointermove', move);
+  hit.addEventListener('pointerdown', move);
+  hit.addEventListener('pointerleave', () => layer.setAttribute('visibility', 'hidden'));
 }
 
 /** 直方圖（給定 edges 與 counts）。 */
@@ -539,12 +676,15 @@ function renderQuote(d) {
     el('h2', {}, '到期損益曲線'),
     lineChart({
       series, vlines, xFmt: xf, yFmt: (v) => (v * 100).toFixed(0) + '%', height: 340,
+      hoverXFmt: (v) => '最差標的期末表現 ' + pct(v, 1),
+      hoverYFmt: (v) => pctS(v, 2),
       hlines: [{ y: pf.coupon_total, label: `配息上限 ${pct(pf.coupon_total)}`, color: css('--ink-3') }],
     }),
     legend([...series.map((s) => ({ name: s.name, color: s.color, dash: !!s.dash })),
       ...vlines.map((v) => ({ name: v.label, color: v.color, dash: true }))]),
     el('p', { class: 'note' },
-      '橫軸為期末「表現最差標的」相對期初的表現，縱軸為總報酬（含配息）。'
+      '將游標移到圖上可用十字線查價。'
+      + '橫軸為期末「表現最差標的」相對期初的表現，縱軸為總報酬（含配息）。'
       + (pf.has_ki
         ? '綠線為期間未跌破下限價的情形（無論期末多低都全額還本）；紅線為曾跌破下限價的情形。兩線之間的落差就是下限保護的價值，也是所謂懸崖式風險。'
         : '本商品無下限保護，期末低於執行價即承接股票。'))));
@@ -633,6 +773,11 @@ function renderBacktest(d) {
       xTickVals: idx.filter((i) => i % Math.max(1, Math.floor(rows.length / 8)) === 0),
       xFmt: (i) => (rows[Math.round(i)] || {}).trade_date || '',
       yFmt: (v) => (v * 100).toFixed(0) + '%',
+      hoverXFmt: (i) => {
+        const r = rows[Math.round(i)] || {};
+        return `${r.trade_date}　${r.scenario || ''}`;
+      },
+      hoverYFmt: (v) => pctS(v, 2),
     }),
     legend([
       { name: 'FCN 報酬', color: css('--s2') },
@@ -660,6 +805,8 @@ function renderPath(d) {
   const series = syms.map((s, i) => ({
     name: s, color: colors[i % colors.length],
     points: d.series[s].map((v, j) => [j, v]), width: 1.8,
+    // 查價時同時給出相對期初的表現與當日實際收盤價
+    hoverFmt: (v) => `${pct(v, 2)}　${num(v * o.initial_prices[s])}`,
   }));
 
   const hlines = [
@@ -693,6 +840,8 @@ function renderPath(d) {
       xTickVals: dates.map((_, i) => i).filter((i) => i % step === 0),
       xFmt: (i) => (dates[Math.round(i)] || '').slice(2),
       yFmt: (v) => (v * 100).toFixed(0) + '%',
+      hoverXFmt: (i) => dates[Math.round(i)] || '',
+      hoverYFmt: (v) => pct(v, 2),
     }),
     legend([
       ...series.map((s) => ({ name: s.name, color: s.color })),
@@ -700,7 +849,8 @@ function renderPath(d) {
       { name: '○ 記憶事件', color: css('--s2') },
       { name: '✕ 觸及生效事件', color: css('--bad') },
     ]),
-    el('p', { class: 'note' }, '縱軸為各標的相對期初價的表現（期初 = 100%）。')));
+    el('p', { class: 'note' },
+      '縱軸為各標的相對期初價的表現（期初 = 100%）。將游標移到圖上可用十字線查價。')));
 
   const isDel = o.is_delivery;
   parts.push(el('section', { class: 'panel' },

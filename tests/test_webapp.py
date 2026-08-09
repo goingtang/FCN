@@ -242,3 +242,27 @@ def test_public_bind_prints_security_warning(monkeypatch, capsys):
 
     webapp.serve("127.0.0.1", 8000)
     assert "⚠" not in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# 圖表互動
+# --------------------------------------------------------------------------
+
+
+def test_crosshair_is_wired_into_the_shared_chart():
+    """十字線查價由 lineChart 統一掛上，三張折線圖都應具備。"""
+    js = (webapp.WEB_DIR / "app.js").read_text()
+    assert "function attachCrosshair" in js
+    assert "attachCrosshair(g, {" in js, "lineChart 未掛上十字線"
+    assert "function nearestIndex" in js
+    # 感應區必須能接到指標事件，且不被十字線圖層擋住
+    assert "pointermove" in js and "pointerleave" in js
+    assert "pointer-events:none" in js
+
+
+def test_charts_supply_precise_hover_formats():
+    """座標軸標籤取整即可，十字線查價必須給到小數位。"""
+    js = (webapp.WEB_DIR / "app.js").read_text()
+    assert js.count("hoverYFmt") >= 4      # 定義 + 三張圖各一
+    assert js.count("hoverXFmt") >= 4
+    assert "hoverFmt" in js                # 路徑圖以此同時顯示股價

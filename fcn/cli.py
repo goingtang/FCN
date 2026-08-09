@@ -263,8 +263,10 @@ def main(argv: list[str] | None = None) -> int:
     rc.set_defaults(func=cmd_reconcile)
 
     w = sub.add_parser("serve", help="啟動網頁介面")
-    w.add_argument("--host", default="127.0.0.1")
-    w.add_argument("--port", type=int, default=8000)
+    w.add_argument("--host", default=None,
+                   help="綁定位址；預設 127.0.0.1，若有 PORT 環境變數則為 0.0.0.0")
+    w.add_argument("--port", type=int, default=None,
+                   help="通訊埠；預設取 PORT 環境變數，否則 8000")
     w.set_defaults(func=cmd_serve)
 
     a = p.parse_args(argv)

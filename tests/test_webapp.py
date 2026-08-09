@@ -227,8 +227,8 @@ def test_public_bind_detection(host, public):
     assert webapp.is_public_bind(host) is public
 
 
-def test_public_bind_prints_security_warning(monkeypatch, capsys):
-    """綁到非本機位址時必須提醒服務沒有帳密也沒有 TLS。"""
+@pytest.fixture
+def fake_server(monkeypatch):
     class _Fake:
         def __init__(self, *a, **k): pass
         def serve_forever(self): raise KeyboardInterrupt
@@ -236,10 +236,24 @@ def test_public_bind_prints_security_warning(monkeypatch, capsys):
 
     monkeypatch.setattr(webapp, "ThreadingHTTPServer", _Fake)
 
+
+def test_public_bind_without_token_warns(monkeypatch, capsys, fake_server):
+    """對外綁定又沒設通行碼時，必須明確警告服務是全開的。"""
+    monkeypatch.delenv("FCN_TOKEN", raising=False)
     webapp.serve("0.0.0.0", 8000)
     out = capsys.readouterr().out
-    assert "⚠" in out and "沒有帳號密碼" in out
+    assert "⚠" in out and "FCN_TOKEN" in out
 
+
+def test_public_bind_with_token_reports_protection(monkeypatch, capsys, fake_server):
+    monkeypatch.setenv("FCN_TOKEN", "s3cret")
+    webapp.serve("0.0.0.0", 8000)
+    out = capsys.readouterr().out
+    assert "⚠" not in out and "通行碼" in out
+
+
+def test_loopback_bind_is_quiet(monkeypatch, capsys, fake_server):
+    monkeypatch.delenv("FCN_TOKEN", raising=False)
     webapp.serve("127.0.0.1", 8000)
     assert "⚠" not in capsys.readouterr().out
 
@@ -266,3 +280,80 @@ def test_charts_supply_precise_hover_formats():
     assert js.count("hoverYFmt") >= 4      # 定義 + 三張圖各一
     assert js.count("hoverXFmt") >= 4
     assert "hoverFmt" in js                # 路徑圖以此同時顯示股價
+
+
+# --------------------------------------------------------------------------
+# 部署：PORT 解析與通行碼
+# --------------------------------------------------------------------------
+
+
+def test_resolve_bind_defaults_to_localhost(monkeypatch):
+    monkeypatch.delenv("PORT", raising=False)
+    monkeypatch.delenv("HOST", raising=False)
+    assert webapp.resolve_bind() == ("127.0.0.1", 8000)
+
+
+def test_resolve_bind_follows_paas_port(monkeypatch):
+    """PaaS 以 PORT 指派通訊埠，且服務必須對外綁定才會被路由到。"""
+    monkeypatch.setenv("PORT", "8080")
+    monkeypatch.delenv("HOST", raising=False)
+    assert webapp.resolve_bind() == ("0.0.0.0", 8080)
+
+
+def test_resolve_bind_explicit_args_win(monkeypatch):
+    monkeypatch.setenv("PORT", "8080")
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    assert webapp.resolve_bind("127.0.0.1", 9999) == ("127.0.0.1", 9999)
+
+
+def test_access_token_off_by_default(monkeypatch):
+    monkeypatch.delenv("FCN_TOKEN", raising=False)
+    assert webapp.access_token() is None
+    monkeypatch.setenv("FCN_TOKEN", "   ")
+    assert webapp.access_token() is None
+    monkeypatch.setenv("FCN_TOKEN", " s3cret ")
+    assert webapp.access_token() == "s3cret"
+
+
+class _Req:
+    """最小可用的 Handler 替身，只驗證通行碼判定。"""
+
+    def __init__(self, cookie=None):
+        self.headers = {"Cookie": cookie} if cookie else {}
+
+    _authed = webapp.Handler._authed
+
+
+def test_auth_open_when_no_token(monkeypatch):
+    monkeypatch.delenv("FCN_TOKEN", raising=False)
+    assert _Req()._authed() is True
+
+
+@pytest.mark.parametrize(
+    "cookie,ok",
+    [
+        (None, False),
+        ("fcn_auth=wrong", False),
+        ("fcn_auth=s3cret", True),
+        ("other=x; fcn_auth=s3cret", True),
+        ("fcn_auth=s3cre", False),
+        ("fcn_auth=s3cretX", False),
+    ],
+)
+def test_auth_checks_cookie(monkeypatch, cookie, ok):
+    monkeypatch.setenv("FCN_TOKEN", "s3cret")
+    assert _Req(cookie)._authed() is ok
+
+
+def test_deployment_files_are_consistent():
+    """Zeabur 依 zbpack.json 找進入點，進入點必須存在且會啟動服務。"""
+    root = webapp.WEB_DIR.parent.parent
+    cfg = json.loads((root / "zbpack.json").read_text())
+    entry = cfg["python"]["entry"]
+    assert (root / entry).is_file(), f"zbpack.json 指向不存在的進入點 {entry}"
+
+    src = (root / entry).read_text()
+    assert "serve()" in src and "from fcn.webapp import serve" in src
+
+    reqs = (root / "requirements.txt").read_text()
+    assert "numpy" in reqs and "pandas" in reqs

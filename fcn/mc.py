@@ -169,16 +169,19 @@ def _simulate_chunk(
     else:
         mu = mp.drift if mp.drift is not None else (mp.rate - mp.div_yield)
 
-    L = mp.chol()
+    # 盡量就地運算：每個 (路徑, 步階, 標的) 的暫存陣列都是數百 MB，
+    # 天真寫法會同時存在七、八份，在小記憶體的容器上直接 OOM。
     z = rng.standard_normal((n_paths, n_steps - 1, n_assets))
-    z = z @ L.T
+    z = z @ mp.chol().T
+    z *= (mp.vol[None, None, :] * np.sqrt(dt[1:])[None, :, None])
+    z += (mu - 0.5 * mp.vol**2)[None, None, :] * dt[1:][None, :, None]
+    np.cumsum(z, axis=1, out=z)
+    np.exp(z, out=z)
 
-    drift_term = (mu - 0.5 * mp.vol**2)[None, None, :] * dt[1:][None, :, None]
-    diff_term = mp.vol[None, None, :] * np.sqrt(dt[1:])[None, :, None] * z
-    logpath = np.concatenate(
-        [np.zeros((n_paths, 1, n_assets)), np.cumsum(drift_term + diff_term, axis=1)], axis=1
-    )
-    return mp.spot[None, None, :] * np.exp(logpath)
+    paths = np.empty((n_paths, n_steps, n_assets), dtype=float)
+    paths[:, 0, :] = mp.spot
+    np.multiply(z, mp.spot[None, None, :], out=paths[:, 1:, :])
+    return paths
 
 
 @dataclass
@@ -352,7 +355,7 @@ def _run(
     seed: int,
     *,
     risk_neutral: bool,
-    chunk: int = 20_000,
+    chunk: int = 5_000,
 ):
     rng = np.random.default_rng(seed)
     chunks = []

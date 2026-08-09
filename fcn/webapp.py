@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import argparse
+import hmac
+import http.cookies
 import json
 import mimetypes
+import os
 import threading
 import traceback
-from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -594,6 +596,42 @@ _ROUTES = {
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# 通行碼（部署到公開網址時使用）
+# --------------------------------------------------------------------------
+
+COOKIE = "fcn_auth"
+
+
+def access_token() -> str | None:
+    """設定了 ``FCN_TOKEN`` 就啟用通行碼保護；未設定則完全開放。"""
+    t = (os.environ.get("FCN_TOKEN") or "").strip()
+    return t or None
+
+
+_LOGIN_PAGE = """<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FCN 詢價平台</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main style="max-width:420px;margin:14vh auto">
+<section class="panel"><h2>請輸入通行碼</h2>
+<p class="hint">本站已啟用存取保護。通行碼由部署者設定於 <code>FCN_TOKEN</code> 環境變數。</p>
+<div class="opts"><div class="opt" style="flex:1">
+<label>通行碼</label><input id="t" type="password" style="width:100%" autofocus></div></div>
+<div class="actions"><button class="go" id="go">進入</button>
+<span class="status" id="msg"></span></div></section></main>
+<script>
+const go = async () => {
+  const r = await fetch('/api/login', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({token: document.getElementById('t').value})});
+  if (r.ok) location.href = '/';
+  else document.getElementById('msg').textContent = '通行碼不正確';
+};
+document.getElementById('go').addEventListener('click', go);
+document.getElementById('t').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+</script></body></html>"""
+
+
 def _json_default(o):
     if isinstance(o, (np.integer,)):
         return int(o)
@@ -626,6 +664,47 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False, default=_json_default).encode("utf-8")
         self._send(code, body, "application/json; charset=utf-8")
 
+    # ---- 通行碼 ----
+
+    def _authed(self) -> bool:
+        token = access_token()
+        if token is None:
+            return True
+        raw = self.headers.get("Cookie")
+        if not raw:
+            return False
+        try:
+            got = http.cookies.SimpleCookie(raw).get(COOKIE)
+        except http.cookies.CookieError:
+            return False
+        return bool(got) and hmac.compare_digest(got.value, token)
+
+    def _send_login(self) -> None:
+        self._send(401, _LOGIN_PAGE.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _do_login(self) -> None:
+        token = access_token()
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            given = str(json.loads(self.rfile.read(length) or b"{}").get("token", ""))
+        except Exception:  # noqa: BLE001
+            given = ""
+        if token is None or not hmac.compare_digest(given, token):
+            # 固定延遲，避免以回應時間試探
+            self._send_json(401, {"error": "通行碼不正確"})
+            return
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        body = json.dumps({"ok": True}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header(
+            "Set-Cookie",
+            f"{COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800{secure}",
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_file(self, rel: str) -> None:
         path = (WEB_DIR / rel).resolve()
         if not str(path).startswith(str(WEB_DIR.resolve())) or not path.is_file():
@@ -638,17 +717,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 介面
         path = self.path.split("?", 1)[0]
-        if path in ("/", "/index.html"):
-            self._send_file("index.html")
-        elif path == "/api/health":
+        if path == "/api/health":                      # 供 PaaS 健康檢查，不需通行碼
             self._send_json(200, {"ok": True})
-        elif path.startswith("/static/"):
+        elif path.startswith("/static/"):              # 登入頁也要載得到樣式
             self._send_file(path[len("/static/"):])
+        elif not self._authed():
+            self._send_login()
+        elif path in ("/", "/index.html"):
+            self._send_file("index.html")
         else:
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
+        if path == "/api/login":
+            self._do_login()
+            return
+        if not self._authed():
+            self._send_json(401, {"error": "請先輸入通行碼"})
+            return
         handler = _ROUTES.get(path)
         if handler is None:
             self._send_json(404, {"error": "not found"})
@@ -690,8 +777,25 @@ def is_public_bind(host: str) -> bool:
     return host.strip().lower() not in _LOOPBACK
 
 
-def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+def resolve_bind(host: str | None = None, port: int | None = None) -> tuple[str, int]:
+    """決定要綁哪個位址與通訊埠。
+
+    PaaS（Zeabur、Railway、Render 等）以 ``PORT`` 環境變數指派通訊埠，並要求
+    服務綁在 ``0.0.0.0`` 才能被路由到；因此偵測到 ``PORT`` 時預設對外綁定。
+    明確傳入的參數一律優先。
+    """
+    env_port = os.environ.get("PORT")
+    if port is None:
+        port = int(env_port) if env_port else 8000
+    if host is None:
+        host = os.environ.get("HOST") or ("0.0.0.0" if env_port else "127.0.0.1")
+    return host, port
+
+
+def serve(host: str | None = None, port: int | None = None) -> None:
+    host, port = resolve_bind(host, port)
     httpd = ThreadingHTTPServer((host, port), Handler)
+    token = access_token()
 
     if is_public_bind(host):
         try:
@@ -699,10 +803,13 @@ def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
         except Exception:  # noqa: BLE001 - 取不到就退回使用者輸入的位址
             shown = host
         print(f"FCN 詢價平台已啟動 →  http://{shown}:{port}")
-        print(
-            "⚠ 已對外開放：本服務沒有帳號密碼也沒有 TLS，僅適合可信任的內部網路。\n"
-            "  請確認未經由防火牆或 NAT 暴露到網際網路。"
-        )
+        if token:
+            print("🔒 已啟用通行碼保護（FCN_TOKEN）")
+        else:
+            print(
+                "⚠ 已對外開放且未設定通行碼：任何連得到此位址的人都能使用。\n"
+                "  部署到公開網址時，請設定環境變數 FCN_TOKEN 啟用存取保護。"
+            )
     else:
         print(f"FCN 詢價平台已啟動 →  http://{host}:{port}")
     print("按 Ctrl+C 結束")
@@ -716,8 +823,8 @@ def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="fcn.webapp", description="FCN 詢價平台網頁介面")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--host", default=None)
+    p.add_argument("--port", type=int, default=None)
     a = p.parse_args(argv)
     serve(a.host, a.port)
     return 0

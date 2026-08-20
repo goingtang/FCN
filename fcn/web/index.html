@@ -98,29 +98,39 @@
 
     <div class="sim">
       <div class="sim-controls">
-        <div class="slider">
-          <label>年化配息 <output id="l-cpn">12%</output></label>
-          <input type="range" id="s-cpn" min="4" max="25" step="0.5" value="12">
+        <div class="grp">
+          <div class="grp-h">① 商品條件<small>跟券商談的</small></div>
+          <div class="slider">
+            <label>年化配息 <output id="l-cpn">12%</output></label>
+            <input type="range" id="s-cpn" min="4" max="25" step="0.5" value="12">
+          </div>
+          <div class="slider">
+            <label>執行價（承接價位） <output id="l-strike">80%</output></label>
+            <input type="range" id="s-strike" min="60" max="95" step="1" value="80">
+            <small>= 下檔緩衝 <b id="l-buffer">20%</b></small>
+          </div>
+          <div class="slider">
+            <label>下限價（觸發承接的門檻） <output id="l-ki">60%</output></label>
+            <input type="range" id="s-ki" min="50" max="90" step="1" value="60">
+            <small>期間收盤價跌破這條線，到期才可能要接股票</small>
+          </div>
         </div>
-        <div class="slider">
-          <label>執行價（承接價位） <output id="l-strike">80%</output></label>
-          <input type="range" id="s-strike" min="60" max="95" step="1" value="80">
-          <small>= 下檔緩衝 <b id="l-buffer">20%</b></small>
+
+        <div class="grp market">
+          <div class="grp-h">② 市場情境<small>你要猜的</small></div>
+          <div class="slider">
+            <label>到期時股價（相對現在） <output id="l-final">85%</output></label>
+            <input type="range" id="s-final" min="20" max="160" step="1" value="85">
+          </div>
+          <label class="chk">
+            <input type="checkbox" id="s-breach">
+            期間曾跌破下限價
+          </label>
+          <small class="onlythis">
+            「直接買股票」的結果<b>只由這一組決定</b> —— 商品條件再怎麼調，
+            股票本身的漲跌都不會變。
+          </small>
         </div>
-        <div class="slider">
-          <label>下限價（觸發承接的門檻） <output id="l-ki">60%</output></label>
-          <input type="range" id="s-ki" min="50" max="90" step="1" value="60">
-          <small>期間收盤價跌破這條線，到期才可能要接股票</small>
-        </div>
-        <hr>
-        <div class="slider">
-          <label>到期時股價（相對現在） <output id="l-final">100%</output></label>
-          <input type="range" id="s-final" min="20" max="160" step="1" value="100">
-        </div>
-        <label class="chk">
-          <input type="checkbox" id="s-breach">
-          期間曾跌破下限價
-        </label>
       </div>
 
       <div class="sim-out">
@@ -129,19 +139,28 @@
           <div class="side fcn">
             <div class="lbl">投資 FCN</div>
             <div class="big" id="v-fcn">+12.00%</div>
+            <div class="amt" id="v-fcn-amt">100,000 → 112,000</div>
             <div class="sub" id="v-fcn-detail">本金 100,000 ＋ 配息 12,000</div>
           </div>
           <div class="vs">vs</div>
           <div class="side hold">
             <div class="lbl">直接買股票</div>
-            <div class="big" id="v-hold">0.00%</div>
-            <div class="sub" id="v-hold-detail">股票市值 100,000</div>
+            <div class="big" id="v-hold">−15.00%</div>
+            <div class="amt" id="v-hold-amt">100,000 → 85,000</div>
+            <div class="sub" id="v-hold-detail">股票市值 85,000</div>
           </div>
         </div>
         <div class="delta" id="v-delta"></div>
+        <div class="note" id="v-ko-note"></div>
         <div class="chart" id="v-chart"></div>
       </div>
     </div>
+
+    <h3>一次看完所有價位</h3>
+    <p class="hint">
+      同一組商品條件下，到期股價落在不同位置時的結果。<b>灰底那列</b>是你目前拉到的位置。
+    </p>
+    <div class="scroll" id="v-table"></div>
   </section>
 
   <section class="panel">

@@ -135,12 +135,70 @@ def test_learn_simulator_matches_engine(final, breach, expected, scenario_word):
 
 
 def test_learn_simulator_formula_in_js_matches_engine():
-    """JS 端的承接公式必須是 面額 x (期末 / 執行價)，與引擎一致。"""
-    assert "NOTIONAL * (final / strike)" in JS
-    # 未承接時報酬就是配息率，且沒有其他上檔
-    assert "ret = cpn;" in JS
+    """JS 端的給付公式必須與引擎一致。
+
+    只比對不變式，不比對標點：綁死字面寫法會讓單純的重構誤報。
+    """
+    assert "function learnOutcome" in JS
+    # 承接：面額 x (期末 / 執行價)
+    assert re.search(r"NOTIONAL\s*\*\s*\(\s*final\s*/\s*strike\s*\)", JS)
+    # 未承接：報酬就是配息率，沒有其他上檔
+    assert re.search(r"\bret:\s*cpn\b", JS)
 
 
 def test_ki_slider_cannot_exceed_strike():
     """下限價必須低於執行價，滑桿要互相夾住，否則會示範出不存在的條款。"""
     assert JS.count("$('s-ki').value = +$('s-strike').value - 1") >= 2
+
+
+# --------------------------------------------------------------------------
+# 比較必須看得出差異
+# --------------------------------------------------------------------------
+
+
+def test_default_scenario_is_not_a_degenerate_comparison():
+    """預設若停在股價 100%，「直接買股票」永遠是 0%，看起來像沒算出來。"""
+    m = re.search(r'<input type="range" id="s-final"[^>]*value="(\d+)"', HTML)
+    assert m, "找不到到期股價滑桿"
+    assert m.group(1) != "100", "預設到期股價不應停在 100%（兩側對比會退化成 0%）"
+
+
+def test_controls_are_split_into_product_and_market_groups():
+    """商品條件動不到股票側；不分組會讓人以為股票那欄壞掉。"""
+    assert "① 商品條件" in HTML and "② 市場情境" in HTML
+    assert "只由這一組決定" in HTML
+
+
+@pytest.mark.parametrize("eid", ["v-fcn-amt", "v-hold-amt", "v-table", "v-ko-note"])
+def test_amount_and_table_elements_exist(eid):
+    assert f'id="{eid}"' in HTML
+
+
+def test_table_shows_both_barrier_states():
+    """對照表要同時列出未破與已破下限價，才不必來回勾選才看得懂。"""
+    assert "FCN（未破下限價）" in JS and "FCN（曾破下限價）" in JS
+    assert "TABLE_ROWS" in JS
+
+
+def test_row_highlight_tie_break_is_deterministic():
+    """130% 正好落在 120% 與 140% 中間，不加容差會由浮點誤差決定標記哪一列。"""
+    assert "Math.abs(x - final) + 1e-9 < Math.abs(near - final)" in JS
+
+
+def test_page_warns_that_autocall_is_not_modelled():
+    """股價漲回原點時真實商品多半已提前出場，教學頁必須說明此簡化。"""
+    assert "提前出場價多半訂在期初的 100%" in JS
+
+
+@pytest.mark.parametrize(
+    "final,breach,expected",
+    [
+        (0.40, True, -0.38),      # 40/80-1+12%
+        (0.50, True, -0.255),
+        (0.70, True, -0.005),
+        (0.80, True, 0.12),       # 恰好等於執行價 -> 還本
+        (1.20, False, 0.12),      # 報酬封頂在配息
+    ],
+)
+def test_table_rows_match_engine(final, breach, expected):
+    assert _engine_return(0.80, 0.60, 0.12, final, breach) == pytest.approx(expected, abs=1e-9)

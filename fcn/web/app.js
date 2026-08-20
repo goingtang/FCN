@@ -1013,43 +1013,95 @@ function learnSim() {
   $('l-final').textContent = pct(final, 0);
   $('l-buffer').textContent = pct(1 - strike, 0);
 
-  const coupon = NOTIONAL * cpn;                    // 12 個月、每月配息
-  const deliver = breached && final < strike;
-
-  let scenario, principal, stockValue, ret;
-  if (deliver) {
-    scenario = 'D　到期承接股票';
-    principal = 0;
-    stockValue = NOTIONAL * (final / strike);
-    ret = (stockValue + coupon) / NOTIONAL - 1;
-  } else {
-    scenario = breached ? 'C　到期還本（曾破下限價，期末站回執行價之上）'
-      : (final >= strike ? 'B　到期還本' : 'B　到期還本（未破下限價）');
-    principal = NOTIONAL;
-    stockValue = 0;
-    ret = cpn;
-  }
+  const r = learnOutcome(cpn, strike, final, breached);
   const hold = final - 1;
+  const holdValue = NOTIONAL * final;
 
-  $('v-scenario').textContent = scenario;
-  $('v-scenario').className = 'verdict' + (deliver ? ' risk' : '');
+  $('v-scenario').textContent = r.scenario;
+  $('v-scenario').className = 'verdict' + (r.deliver ? ' risk' : '');
 
-  $('v-fcn').textContent = pctS(ret);
-  $('v-fcn').className = 'big ' + (ret >= 0 ? 'pos' : 'neg');
-  $('v-fcn-detail').textContent = deliver
-    ? `股票市值 ${money(stockValue)}　＋配息 ${money(coupon)}`
-    : `本金 ${money(NOTIONAL)}　＋配息 ${money(coupon)}`;
+  $('v-fcn').textContent = pctS(r.ret);
+  $('v-fcn').className = 'big ' + (r.ret >= 0 ? 'pos' : 'neg');
+  $('v-fcn-amt').textContent = `${money(NOTIONAL)} → ${money(r.value)}`;
+  $('v-fcn-detail').textContent = r.deliver
+    ? `股票市值 ${money(r.stockValue)}　＋配息 ${money(r.coupon)}`
+    : `本金 ${money(NOTIONAL)}　＋配息 ${money(r.coupon)}`;
 
   $('v-hold').textContent = pctS(hold);
   $('v-hold').className = 'big ' + (hold >= 0 ? 'pos' : 'neg');
-  $('v-hold-detail').textContent = `股票市值 ${money(NOTIONAL * final)}`;
+  $('v-hold-amt').textContent = `${money(NOTIONAL)} → ${money(holdValue)}`;
+  $('v-hold-detail').textContent = final === 1
+    ? '股價與期初相同，直接持有不賺不賠'
+    : `股價${final > 1 ? '上漲' : '下跌'} ${pct(Math.abs(final - 1))}`;
 
-  const gap = ret - hold;
+  const gap = r.ret - hold;
   $('v-delta').innerHTML = gap >= 0
-    ? `這個情境下 <b class="pos">FCN 勝出 ${pct(gap)}</b>`
-    : `這個情境下 <b class="neg">FCN 落後 ${pct(-gap)}</b>　（放棄的漲幅）`;
+    ? `這個情境下 <b class="pos">FCN 勝出 ${pct(gap)}</b>　（多賺 ${money(gap * NOTIONAL)}）`
+    : `這個情境下 <b class="neg">FCN 落後 ${pct(-gap)}</b>　`
+      + `（少賺 ${money(-gap * NOTIONAL)}，這是放棄上檔的代價）`;
+
+  // 提前出場價通常訂在期初的 100%：真實商品在股價回到原點時多半早就出場了
+  $('v-ko-note').textContent = final >= 1
+    ? '註：本試算只看到期情境。真實商品的提前出場價多半訂在期初的 100%，'
+      + '股價漲回原點時通常早就提前出場，報酬同樣封頂在已累積的配息。'
+    : '';
 
   drawLearnChart(cpn, strike, ki, final, breached);
+  drawLearnTable(cpn, strike, final, breached);
+}
+
+/** 到期給付：規則與 fcn/engine.py 一致（此處聚焦到期，不含提前出場）。 */
+function learnOutcome(cpn, strike, final, breached) {
+  const coupon = NOTIONAL * cpn;
+  const deliver = breached && final < strike;
+  if (deliver) {
+    const stockValue = NOTIONAL * (final / strike);
+    return {
+      deliver: true, coupon, stockValue, value: stockValue + coupon,
+      ret: (stockValue + coupon) / NOTIONAL - 1,
+      scenario: 'D\u3000到期承接股票',
+    };
+  }
+  return {
+    deliver: false, coupon, stockValue: 0, value: NOTIONAL + coupon, ret: cpn,
+    scenario: breached
+      ? 'C\u3000到期還本（曾破下限價，期末站回執行價之上）'
+      : 'B\u3000到期還本',
+  };
+}
+
+const TABLE_ROWS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.4];
+
+/** 一次列出各種到期股價的結果，避免只看單一情境而誤判。 */
+function drawLearnTable(cpn, strike, final, breached) {
+  const rows = TABLE_ROWS.map((x) => {
+    const safe = learnOutcome(cpn, strike, x, false).ret;
+    const hit = learnOutcome(cpn, strike, x, true).ret;
+    const hold = x - 1;
+    return [
+      pct(x, 0),
+      el('span', { class: sign(safe) }, pctS(safe)),
+      el('span', { class: sign(hit) }, pctS(hit)),
+      el('span', { class: sign(hold) }, pctS(hold)),
+      el('span', { class: sign((breached ? hit : safe) - hold) },
+        pctS((breached ? hit : safe) - hold)),
+    ];
+  });
+
+  const t = dataTable(
+    ['到期股價', 'FCN（未破下限價）', 'FCN（曾破下限價）', '直接買股票', '目前設定下的差距'],
+    rows,
+  );
+  // 標出目前滑桿所在那一列。容差是為了讓正中間的值（例如 130% 落在
+  // 120% 與 140% 之間）穩定取較低那列，而不是由浮點誤差決定。
+  let near = TABLE_ROWS[0];
+  for (const x of TABLE_ROWS) {
+    if (Math.abs(x - final) + 1e-9 < Math.abs(near - final)) near = x;
+  }
+  t.querySelectorAll('tbody tr').forEach((tr, i) => {
+    if (TABLE_ROWS[i] === near) tr.className = 'here';
+  });
+  $('v-table').replaceChildren(t);
 }
 
 function drawLearnChart(cpn, strike, ki, final, breached) {

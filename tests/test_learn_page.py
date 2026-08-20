@@ -146,6 +146,50 @@ def test_learn_simulator_formula_in_js_matches_engine():
     assert re.search(r"\bret:\s*cpn\b", JS)
 
 
+@pytest.mark.parametrize("ki_type", [KIType.AKI, KIType.EKI])
+def test_final_price_below_the_barrier_is_always_a_breach(ki_type):
+    """期末價低於下限價卻顯示「還本」是不可能的情境。
+
+    AKI 逐日觀察會碰到，EKI 的期末觀察也會碰到 —— 引擎兩種都判定承接，
+    教學頁的勾選框因此不能讓人選出「未破」。
+    """
+    terms = FCNTerms(
+        underlyings=["AAA"], tenor_months=12, coupon_pa=0.12, strike_pct=0.80,
+        ko_type=KOType.NONE, autocall_pct=1.0, ki_type=ki_type, ki_pct=0.60,
+        notional=100_000.0, integer_shares=False,
+    )
+    days = pd.bdate_range("2024-01-02", periods=400, name="date")
+    px = pd.DataFrame(100.0, index=days, columns=["AAA"], dtype=float)
+    sch = build_schedule(terms, days, days[0])
+    px.loc[sch.final_valuation] = 20.0       # 只有期末那天在下限價之下
+    assert evaluate(terms, px, sch).scenario is Scenario.DELIVERY
+
+
+def test_js_treats_a_sub_barrier_final_price_as_a_breach():
+    """給付、對照表、損益圖三處都要套同一條規則，否則會互相矛盾。"""
+    assert re.search(r"const hit = breached \|\| final < ki", JS)
+    assert JS.count("breached || v < ki") + JS.count("breached || x < ki") >= 2
+
+
+@pytest.mark.parametrize("eid", ["s-breach-note", "v-table-note"])
+def test_breach_explanations_exist(eid):
+    assert f'id="{eid}"' in HTML
+
+
+def test_breach_checkbox_is_locked_below_the_barrier():
+    """鎖住之後必須說明原因，並記住使用者原本的選擇才還原得了。"""
+    assert re.search(r"const forced = final < ki", JS)
+    assert re.search(r"box\.disabled = forced", JS)
+    assert "userBreach" in JS
+    assert "無法選擇「未破」" in JS
+
+
+def test_impossible_table_cells_are_left_blank():
+    """低於下限價那幾列的「未破下限價」填數字等於在示範不存在的情境。"""
+    assert re.search(r"x < ki \?\s*el\('span', \{ class: 'na'", JS)
+    assert "不可能成立" in JS
+
+
 def test_ki_slider_cannot_exceed_strike():
     """下限價必須低於執行價，否則會示範出不存在的條款。
 
@@ -290,9 +334,13 @@ def test_share_card_carries_the_risk_disclosure():
 
 
 def test_share_card_payoff_matches_the_page():
-    """卡片上的損益線必須與 learnOutcome 同一條規則（破下限價且低於執行價才承接）。"""
-    assert re.search(r"breached\s*&&\s*v\s*<\s*strike\s*\?\s*v\s*/\s*strike\s*-\s*1\s*:\s*0",
-                     SHARE_JS)
+    """卡片上的損益線必須與 learnOutcome 同一條規則。
+
+    承接的條件是「觸發過下限價」且「期末低於執行價」，其中期末價本身低於
+    下限價也算觸發 —— 三處若不一致，圖與數字就會互相打架。
+    """
+    assert re.search(
+        r"\(breached \|\| v < ki\)\s*&&\s*v < strike\s*\?\s*v / strike - 1\s*:\s*0", SHARE_JS)
 
 
 def test_share_file_name_is_identifiable():

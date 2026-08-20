@@ -1000,6 +1000,9 @@ const QUICK_PICKS = ['NVDA UW', 'TSM UN', 'AAPL UW', 'TSLA UW', 'MSFT UW', 'AMD 
 // 行情尚未載入前先用 100 元的示意價，讓頁面一進來就能操作
 let learnStock = { symbol: '示意標的', name: '', price: 100, live: false };
 
+// 使用者自己勾的「期間曾跌破下限價」；被強制勾選時要記得原本的選擇
+let userBreach = false;
+
 function setStockInfo(html, bad) {
   const n = $('s-info');
   n.className = 'stockinfo' + (bad ? ' bad' : '');
@@ -1036,8 +1039,19 @@ function learnSim() {
   const strike = +$('s-strike').value / 100;
   const ki = +$('s-ki').value / 100;
   const final = +$('s-final').value / 100;
-  const breached = $('s-breach').checked;
   const spot = learnStock.price;
+
+  // 期末價若已低於下限價，下限價必然在期間被觸發過 —— 不能讓人勾成「未破」，
+  // 那是不存在的情境。此時強制勾選並鎖住，拉回下限價之上再還原使用者的選擇。
+  const forced = final < ki;
+  const box = $('s-breach');
+  box.disabled = forced;
+  box.checked = forced || userBreach;
+  const breached = box.checked;
+  $('s-breach-note').textContent = forced
+    ? `到期股價 ${num(spot * final)} 已低於下限價 ${num(spot * ki)}，`
+      + '期間必然觸發過，無法選擇「未破」。'
+    : '';
 
   $('l-cpn').textContent = pct(cpn, 1);
   $('l-strike').textContent = pct(strike, 0);
@@ -1050,7 +1064,7 @@ function learnSim() {
   $('l-final-pct').textContent = pct(final, 0);
   $('l-table-sym').textContent = learnStock.live ? `（${learnStock.symbol}）` : '';
 
-  const r = learnOutcome(cpn, strike, final, breached, spot);
+  const r = learnOutcome(cpn, strike, ki, final, breached, spot);
   const hold = final - 1;
 
   $('v-scenario').textContent = r.scenario;
@@ -1083,13 +1097,16 @@ function learnSim() {
     : '';
 
   drawLearnChart(cpn, strike, ki, final, breached, spot);
-  drawLearnTable(cpn, strike, final, breached, spot);
+  drawLearnTable(cpn, strike, ki, final, breached, spot);
 }
 
 /** 到期給付：規則與 fcn/engine.py 一致（此處聚焦到期，不含提前出場）。 */
-function learnOutcome(cpn, strike, final, breached, spot) {
+function learnOutcome(cpn, strike, ki, final, breached, spot) {
   const coupon = NOTIONAL * cpn;
-  const deliver = breached && final < strike;
+  // 期末價低於下限價 = 下限價已被觸發：AKI 逐日觀察會碰到，EKI 的期末觀察也會碰到。
+  // 所以「期間曾跌破」沒勾也算破，否則會算出一個不可能存在的情境。
+  const hit = breached || final < ki;
+  const deliver = hit && final < strike;
   if (deliver) {
     const stockValue = NOTIONAL * (final / strike);
     return {
@@ -1101,7 +1118,7 @@ function learnOutcome(cpn, strike, final, breached, spot) {
   }
   return {
     deliver: false, coupon, stockValue: 0, value: NOTIONAL + coupon, ret: cpn, shares: 0,
-    scenario: breached
+    scenario: hit
       ? 'C　到期還本（曾破下限價，期末站回執行價之上）'
       : 'B　到期還本',
   };
@@ -1110,21 +1127,27 @@ function learnOutcome(cpn, strike, final, breached, spot) {
 const TABLE_ROWS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.4];
 
 /** 一次列出各種到期股價的結果，避免只看單一情境而誤判。 */
-function drawLearnTable(cpn, strike, final, breached, spot) {
+function drawLearnTable(cpn, strike, ki, final, breached, spot) {
+  // 期末價在下限價之下的那幾列，「未破下限價」是不可能發生的組合，留白比填數字誠實
+  const impossible = TABLE_ROWS.some((x) => x < ki);
   const rows = TABLE_ROWS.map((x) => {
-    const safe = learnOutcome(cpn, strike, x, false, spot).ret;
-    const hit = learnOutcome(cpn, strike, x, true, spot).ret;
+    const safe = learnOutcome(cpn, strike, ki, x, false, spot).ret;
+    const hit = learnOutcome(cpn, strike, ki, x, true, spot).ret;
     const hold = x - 1;
+    const mine = (breached || x < ki) ? hit : safe;
     return [
       num(spot * x),
       pct(x, 0),
-      el('span', { class: sign(safe) }, pctS(safe)),
+      x < ki ? el('span', { class: 'na', title: '期末價低於下限價，不可能未觸發' }, '—')
+        : el('span', { class: sign(safe) }, pctS(safe)),
       el('span', { class: sign(hit) }, pctS(hit)),
       el('span', { class: sign(hold) }, pctS(hold)),
-      el('span', { class: sign((breached ? hit : safe) - hold) },
-        pctS((breached ? hit : safe) - hold)),
+      el('span', { class: sign(mine - hold) }, pctS(mine - hold)),
     ];
   });
+  $('v-table-note').textContent = impossible
+    ? `到期股價低於下限價 ${num(spot * ki)} 的那幾列，「未破下限價」不可能成立，故留白。`
+    : '';
 
   const t = dataTable(
     ['到期股價', '相對現在', 'FCN（未破下限價）', 'FCN（曾破下限價）',
@@ -1146,7 +1169,9 @@ function drawLearnTable(cpn, strike, final, breached, spot) {
 function drawLearnChart(cpn, strike, ki, final, breached, spot) {
   const xs = [];
   for (let x = 0.2; x <= 1.601; x += 0.01) xs.push(x);
-  const fcnAt = (x) => (breached && x < strike ? x / strike - 1 : 0) + cpn;
+  // x < ki 一定觸發過下限價，所以即使沒勾「期間曾跌破」，下限價左側仍是承接曲線。
+  // 線在下限價處會跳一階 —— 那正是敲入型商品的樣子，不是畫錯。
+  const fcnAt = (x) => ((breached || x < ki) && x < strike ? x / strike - 1 : 0) + cpn;
 
   const vlines = [
     { x: strike, label: `執行價 ${num(spot * strike)}`, color: css('--warn') },
@@ -1220,7 +1245,7 @@ function cardChart(g, x, y, w, h, o) {
   const { cpn, strike, ki, final, breached, spot } = o;
   const L = x + 70, R = x + w - 16, T = y + 18, B = y + h - 36;
   const xlo = 0.2, xhi = 1.6;
-  const f = (v) => (breached && v < strike ? v / strike - 1 : 0) + cpn;
+  const f = (v) => ((breached || v < ki) && v < strike ? v / strike - 1 : 0) + cpn;
 
   const xs = [];
   for (let v = xlo; v <= xhi + 1e-9; v += 0.01) xs.push(v);
@@ -1278,10 +1303,11 @@ function buildShareSvg() {
   const strike = +$('s-strike').value / 100;
   const ki = +$('s-ki').value / 100;
   const final = +$('s-final').value / 100;
-  const breached = $('s-breach').checked;
   const spot = learnStock.price;
+  // 期末價低於下限價就一定觸發過，勾選框是否被鎖住不影響這張圖的判斷
+  const breached = $('s-breach').checked || final < ki;
 
-  const r = learnOutcome(cpn, strike, final, breached, spot);
+  const r = learnOutcome(cpn, strike, ki, final, breached, spot);
   const hold = final - 1;
   const gap = r.ret - hold;
   const sym = learnStock.live ? learnStock.symbol : '示意標的';
@@ -1430,7 +1456,11 @@ async function downloadSharePng() {
 $('btn-png').addEventListener('click', downloadSharePng);
 
 ['s-cpn', 's-final'].forEach((id) => $(id).addEventListener('input', learnSim));
-$('s-breach').addEventListener('change', learnSim);
+// 期末價跌破下限價時會強制勾選；記住使用者原本的選擇，拉回來才還原得了
+$('s-breach').addEventListener('change', () => {
+  userBreach = $('s-breach').checked;
+  learnSim();
+});
 $('btn-goto-quote').addEventListener('click', () => showTab('quote'));
 
 // 下限價不可高於執行價（條款要求），拉動時互相夾住

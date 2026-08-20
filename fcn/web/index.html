@@ -98,29 +98,41 @@
 
     <div class="sim">
       <div class="sim-controls">
+        <div class="grp stock">
+          <div class="grp-h">連結標的<small>用真實股價試算</small></div>
+          <div class="picker">
+            <input id="s-ticker" list="ticker-list" value="NVDA UW" placeholder="NVDA UW">
+            <button class="ghost" id="btn-load-stock">查詢</button>
+          </div>
+          <div class="quick" id="quick-picks"></div>
+          <div class="stockinfo" id="s-info">載入中…</div>
+        </div>
+
         <div class="grp">
           <div class="grp-h">① 商品條件<small>跟券商談的</small></div>
           <div class="slider">
             <label>年化配息 <output id="l-cpn">12%</output></label>
             <input type="range" id="s-cpn" min="4" max="25" step="0.5" value="12">
+            <small>12 個月共領 <b id="l-coupon-amt">12,000</b> 美元</small>
           </div>
           <div class="slider">
             <label>執行價（承接價位） <output id="l-strike">80%</output></label>
             <input type="range" id="s-strike" min="60" max="95" step="1" value="80">
-            <small>= 下檔緩衝 <b id="l-buffer">20%</b></small>
+            <small>跌到 <b id="l-strike-px">—</b> 才要接手 ｜ 下檔緩衝 <b id="l-buffer">20%</b></small>
           </div>
           <div class="slider">
             <label>下限價（觸發承接的門檻） <output id="l-ki">60%</output></label>
             <input type="range" id="s-ki" min="50" max="90" step="1" value="60">
-            <small>期間收盤價跌破這條線，到期才可能要接股票</small>
+            <small>期間收盤價跌破 <b id="l-ki-px">—</b>，到期才可能要接股票</small>
           </div>
         </div>
 
         <div class="grp market">
           <div class="grp-h">② 市場情境<small>你要猜的</small></div>
           <div class="slider">
-            <label>到期時股價（相對現在） <output id="l-final">85%</output></label>
+            <label>到期時股價 <output id="l-final">—</output></label>
             <input type="range" id="s-final" min="20" max="160" step="1" value="85">
+            <small>相對現在 <b id="l-final-pct">85%</b></small>
           </div>
           <label class="chk">
             <input type="checkbox" id="s-breach">
@@ -156,7 +168,7 @@
       </div>
     </div>
 
-    <h3>一次看完所有價位</h3>
+    <h3>一次看完所有價位<span id="l-table-sym"></span></h3>
     <p class="hint">
       同一組商品條件下，到期股價落在不同位置時的結果。<b>灰底那列</b>是你目前拉到的位置。
     </p>

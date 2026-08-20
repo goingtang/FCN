@@ -67,3 +67,15 @@ def test_solve_state_labels_cover_every_blankable_field():
     labelled = set(re.findall(r"'([\w-]+)':", labels))
 
     assert set(ids) <= labelled, f"缺少留白欄位標籤：{sorted(set(ids) - labelled)}"
+
+
+def test_client_side_errors_are_not_retried():
+    """404 代表代碼不存在，重試只會讓使用者多等一輪退避才看到錯誤。"""
+    import inspect
+
+    from fcn import data
+
+    src = inspect.getsource(data._http_get)
+    assert "urllib.error.HTTPError" in src
+    assert "exc.code != 429" in src           # 429 是流量限制，仍應重試
+    assert "查無此標的" in src

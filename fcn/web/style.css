@@ -469,3 +469,30 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; padding: 24px
 }
 #v-ko-note:empty { display: none; }
 tr.here td { background: var(--line-2) !important; font-weight: 600; }
+
+/* 教學頁：真實標的選擇 */
+.grp.stock { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px; margin-bottom: 18px; }
+.picker { display: flex; gap: 8px; }
+.picker input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--ink); border-radius: 5px; padding: 7px 9px; font: 13px var(--mono);
+}
+.picker input:focus { outline: none; border-color: var(--accent); }
+.picker button { white-space: nowrap; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.quick button {
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2);
+  border-radius: 99px; padding: 4px 11px; font-size: 12px; font-family: var(--mono);
+  cursor: pointer;
+}
+.quick button:hover { border-color: var(--accent); color: var(--accent); }
+.quick button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stockinfo {
+  margin-top: 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+  padding-top: 9px; border-top: 1px solid var(--line);
+}
+.stockinfo .px { font-family: var(--mono); font-weight: 700; color: var(--ink); font-size: 15px; }
+.stockinfo.bad { color: var(--bad); }
+.slider small b { font-family: var(--mono); color: var(--ink); }
+#l-table-sym { font-weight: 400; color: var(--ink-3); }

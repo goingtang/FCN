@@ -147,8 +147,17 @@ def test_learn_simulator_formula_in_js_matches_engine():
 
 
 def test_ki_slider_cannot_exceed_strike():
-    """下限價必須低於執行價，滑桿要互相夾住，否則會示範出不存在的條款。"""
-    assert JS.count("$('s-ki').value = +$('s-strike').value - 1") >= 2
+    """下限價必須低於執行價，否則會示範出不存在的條款。
+
+    檢查夾制邏輯存在，且兩支滑桿都接上 —— 只接一支的話，拉另一支就會跑掉。
+    """
+    assert re.search(
+        r"\$\('s-ki'\)\.value\s*=\s*\+\$\('s-strike'\)\.value\s*-\s*1", JS)
+    for slider in ("s-strike", "s-ki"):
+        assert re.search(
+            rf"\$\('{slider}'\)\.addEventListener\('input',\s*clampKi\)", JS), (
+            f"{slider} 未接上下限價夾制"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -202,3 +211,41 @@ def test_page_warns_that_autocall_is_not_modelled():
 )
 def test_table_rows_match_engine(final, breach, expected):
     assert _engine_return(0.80, 0.60, 0.12, final, breach) == pytest.approx(expected, abs=1e-9)
+
+
+# --------------------------------------------------------------------------
+# 用真實股價試算
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "eid",
+    ["s-ticker", "btn-load-stock", "quick-picks", "s-info",
+     "l-strike-px", "l-ki-px", "l-final-pct", "l-coupon-amt", "l-table-sym"],
+)
+def test_stock_picker_elements_exist(eid):
+    assert f'id="{eid}"' in HTML, f"教學頁缺少標的選擇元素 {eid}"
+
+
+def test_price_levels_are_shown_in_dollars():
+    """「執行價 80%」不如「跌到 174.05 才要接手」直覺。"""
+    assert "l-strike-px" in JS and "l-ki-px" in JS
+    assert re.search(r"l-strike-px'\)\.textContent\s*=\s*num\(spot \* strike\)", JS)
+    assert re.search(r"l-ki-px'\)\.textContent\s*=\s*num\(spot \* ki\)", JS)
+
+
+def test_falls_back_to_a_placeholder_price():
+    """行情抓不到時仍要能操作，不能整頁卡住。"""
+    assert re.search(r"price:\s*100,\s*live:\s*false", JS)
+    assert "示意價試算" in JS
+
+
+def test_delivery_shows_share_count_with_a_decimal():
+    """100,000 / 174.05 = 574.5；四捨五入成 575 會讓人對不上數字。"""
+    assert re.search(r"num\(r\.shares,\s*1\)", JS)
+    assert re.search(r"num\(NOTIONAL / spot,\s*1\)", JS)
+
+
+def test_ticker_picker_is_wired_to_the_shared_datalist():
+    m = re.search(r'<input id="s-ticker"[^>]*>', HTML)
+    assert m and 'list="ticker-list"' in m.group(0)

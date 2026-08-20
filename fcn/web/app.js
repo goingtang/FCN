@@ -995,27 +995,63 @@ syncForm();
 /* ====================== 教學頁互動試算 ====================== */
 
 const NOTIONAL = 100_000;
+const QUICK_PICKS = ['NVDA UW', 'TSM UN', 'AAPL UW', 'TSLA UW', 'MSFT UW', 'AMD UW'];
 
-/**
- * 教學頁的即時試算：以最差表現標的的期末表現，算出 FCN 與直接持股的結果。
- * 與後端 fcn/engine.py 的到期給付規則一致（提前出場另計，此處聚焦到期情境）。
- */
+// 行情尚未載入前先用 100 元的示意價，讓頁面一進來就能操作
+let learnStock = { symbol: '示意標的', name: '', price: 100, live: false };
+
+function setStockInfo(html, bad) {
+  const n = $('s-info');
+  n.className = 'stockinfo' + (bad ? ' bad' : '');
+  n.innerHTML = html;
+}
+
+async function loadLearnStock(ticker) {
+  $('s-ticker').value = ticker;
+  document.querySelectorAll('#quick-picks button').forEach(
+    (b) => b.classList.toggle('on', b.dataset.t === ticker));
+  setStockInfo('查詢中…');
+  try {
+    const r = await fetch('/api/tickers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ underlyings: [ticker] }),
+    });
+    const j = await r.json();
+    const t = (j.tickers || [])[0];
+    if (!r.ok || !t || !t.ok) throw new Error((t && t.error) || j.error || '查無此標的');
+    learnStock = { symbol: t.symbol, name: t.name, price: t.last, live: true };
+    setStockInfo(
+      `<b>${t.symbol}</b> ${t.name || ''}<br>`
+      + `現價 <span class="px">${num(t.last)}</span> ${t.currency}`
+      + `　<span style="color:var(--ink-3)">${t.last_date} 收盤</span>`);
+  } catch (e) {
+    learnStock = { symbol: '示意標的', name: '', price: 100, live: false };
+    setStockInfo(`${e.message}　—　暫以每股 100 元的示意價試算`, true);
+  }
+  learnSim();
+}
+
 function learnSim() {
   const cpn = +$('s-cpn').value / 100;
   const strike = +$('s-strike').value / 100;
   const ki = +$('s-ki').value / 100;
   const final = +$('s-final').value / 100;
   const breached = $('s-breach').checked;
+  const spot = learnStock.price;
 
   $('l-cpn').textContent = pct(cpn, 1);
   $('l-strike').textContent = pct(strike, 0);
   $('l-ki').textContent = pct(ki, 0);
-  $('l-final').textContent = pct(final, 0);
   $('l-buffer').textContent = pct(1 - strike, 0);
+  $('l-coupon-amt').textContent = money(NOTIONAL * cpn);
+  $('l-strike-px').textContent = num(spot * strike);
+  $('l-ki-px').textContent = num(spot * ki);
+  $('l-final').textContent = num(spot * final);
+  $('l-final-pct').textContent = pct(final, 0);
+  $('l-table-sym').textContent = learnStock.live ? `（${learnStock.symbol}）` : '';
 
-  const r = learnOutcome(cpn, strike, final, breached);
+  const r = learnOutcome(cpn, strike, final, breached, spot);
   const hold = final - 1;
-  const holdValue = NOTIONAL * final;
 
   $('v-scenario').textContent = r.scenario;
   $('v-scenario').className = 'verdict' + (r.deliver ? ' risk' : '');
@@ -1024,15 +1060,15 @@ function learnSim() {
   $('v-fcn').className = 'big ' + (r.ret >= 0 ? 'pos' : 'neg');
   $('v-fcn-amt').textContent = `${money(NOTIONAL)} → ${money(r.value)}`;
   $('v-fcn-detail').textContent = r.deliver
-    ? `股票市值 ${money(r.stockValue)}　＋配息 ${money(r.coupon)}`
+    ? `承接 ${learnStock.symbol} ${num(r.shares, 1)} 股 @ ${num(spot * strike)}`
+      + `　市值 ${money(r.stockValue)}　＋配息 ${money(r.coupon)}`
     : `本金 ${money(NOTIONAL)}　＋配息 ${money(r.coupon)}`;
 
   $('v-hold').textContent = pctS(hold);
   $('v-hold').className = 'big ' + (hold >= 0 ? 'pos' : 'neg');
-  $('v-hold-amt').textContent = `${money(NOTIONAL)} → ${money(holdValue)}`;
-  $('v-hold-detail').textContent = final === 1
-    ? '股價與期初相同，直接持有不賺不賠'
-    : `股價${final > 1 ? '上漲' : '下跌'} ${pct(Math.abs(final - 1))}`;
+  $('v-hold-amt').textContent = `${money(NOTIONAL)} → ${money(NOTIONAL * final)}`;
+  $('v-hold-detail').textContent =
+    `${num(NOTIONAL / spot, 1)} 股 @ ${num(spot)}　→ 每股 ${num(spot * final)}`;
 
   const gap = r.ret - hold;
   $('v-delta').innerHTML = gap >= 0
@@ -1046,12 +1082,12 @@ function learnSim() {
       + '股價漲回原點時通常早就提前出場，報酬同樣封頂在已累積的配息。'
     : '';
 
-  drawLearnChart(cpn, strike, ki, final, breached);
-  drawLearnTable(cpn, strike, final, breached);
+  drawLearnChart(cpn, strike, ki, final, breached, spot);
+  drawLearnTable(cpn, strike, final, breached, spot);
 }
 
 /** 到期給付：規則與 fcn/engine.py 一致（此處聚焦到期，不含提前出場）。 */
-function learnOutcome(cpn, strike, final, breached) {
+function learnOutcome(cpn, strike, final, breached, spot) {
   const coupon = NOTIONAL * cpn;
   const deliver = breached && final < strike;
   if (deliver) {
@@ -1059,26 +1095,28 @@ function learnOutcome(cpn, strike, final, breached) {
     return {
       deliver: true, coupon, stockValue, value: stockValue + coupon,
       ret: (stockValue + coupon) / NOTIONAL - 1,
-      scenario: 'D\u3000到期承接股票',
+      shares: NOTIONAL / (spot * strike),
+      scenario: 'D　到期承接股票',
     };
   }
   return {
-    deliver: false, coupon, stockValue: 0, value: NOTIONAL + coupon, ret: cpn,
+    deliver: false, coupon, stockValue: 0, value: NOTIONAL + coupon, ret: cpn, shares: 0,
     scenario: breached
-      ? 'C\u3000到期還本（曾破下限價，期末站回執行價之上）'
-      : 'B\u3000到期還本',
+      ? 'C　到期還本（曾破下限價，期末站回執行價之上）'
+      : 'B　到期還本',
   };
 }
 
 const TABLE_ROWS = [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.4];
 
 /** 一次列出各種到期股價的結果，避免只看單一情境而誤判。 */
-function drawLearnTable(cpn, strike, final, breached) {
+function drawLearnTable(cpn, strike, final, breached, spot) {
   const rows = TABLE_ROWS.map((x) => {
-    const safe = learnOutcome(cpn, strike, x, false).ret;
-    const hit = learnOutcome(cpn, strike, x, true).ret;
+    const safe = learnOutcome(cpn, strike, x, false, spot).ret;
+    const hit = learnOutcome(cpn, strike, x, true, spot).ret;
     const hold = x - 1;
     return [
+      num(spot * x),
       pct(x, 0),
       el('span', { class: sign(safe) }, pctS(safe)),
       el('span', { class: sign(hit) }, pctS(hit)),
@@ -1089,7 +1127,8 @@ function drawLearnTable(cpn, strike, final, breached) {
   });
 
   const t = dataTable(
-    ['到期股價', 'FCN（未破下限價）', 'FCN（曾破下限價）', '直接買股票', '目前設定下的差距'],
+    ['到期股價', '相對現在', 'FCN（未破下限價）', 'FCN（曾破下限價）',
+      '直接買股票', '目前設定下的差距'],
     rows,
   );
   // 標出目前滑桿所在那一列。容差是為了讓正中間的值（例如 130% 落在
@@ -1104,14 +1143,14 @@ function drawLearnTable(cpn, strike, final, breached) {
   $('v-table').replaceChildren(t);
 }
 
-function drawLearnChart(cpn, strike, ki, final, breached) {
+function drawLearnChart(cpn, strike, ki, final, breached, spot) {
   const xs = [];
   for (let x = 0.2; x <= 1.601; x += 0.01) xs.push(x);
   const fcnAt = (x) => (breached && x < strike ? x / strike - 1 : 0) + cpn;
 
   const vlines = [
-    { x: strike, label: '執行價', color: css('--warn') },
-    { x: ki, label: '下限價', color: css('--bad') },
+    { x: strike, label: `執行價 ${num(spot * strike)}`, color: css('--warn') },
+    { x: ki, label: `下限價 ${num(spot * ki)}`, color: css('--bad') },
   ];
   const series = [
     {
@@ -1127,9 +1166,9 @@ function drawLearnChart(cpn, strike, ki, final, breached) {
   const box = $('v-chart');
   box.replaceChildren(lineChart({
     series, vlines, height: 250,
-    xFmt: (v) => (v * 100).toFixed(0) + '%',
+    xFmt: (v) => num(spot * v, spot >= 100 ? 0 : 1),
     yFmt: (v) => (v * 100).toFixed(0) + '%',
-    hoverXFmt: (v) => '期末股價 ' + pct(v, 1),
+    hoverXFmt: (v) => `到期股價 ${num(spot * v)}　(${pct(v, 1)})`,
     hoverYFmt: (v) => pctS(v, 2),
     markers: [
       { x: final, y: fcnAt(final), color: css('--accent'), shape: 'o', title: '目前設定' },
@@ -1144,20 +1183,26 @@ function drawLearnChart(cpn, strike, ki, final, breached) {
   ]));
 }
 
-['s-cpn', 's-strike', 's-ki', 's-final'].forEach(
-  (id) => $(id).addEventListener('input', learnSim));
+['s-cpn', 's-final'].forEach((id) => $(id).addEventListener('input', learnSim));
 $('s-breach').addEventListener('change', learnSim);
 $('btn-goto-quote').addEventListener('click', () => showTab('quote'));
 
 // 下限價不可高於執行價（條款要求），拉動時互相夾住
-$('s-strike').addEventListener('input', () => {
+function clampKi() {
   if (+$('s-ki').value >= +$('s-strike').value) $('s-ki').value = +$('s-strike').value - 1;
   learnSim();
-});
-$('s-ki').addEventListener('input', () => {
-  if (+$('s-ki').value >= +$('s-strike').value) $('s-ki').value = +$('s-strike').value - 1;
-  learnSim();
+}
+$('s-strike').addEventListener('input', clampKi);
+$('s-ki').addEventListener('input', clampKi);
+
+$('quick-picks').replaceChildren(...QUICK_PICKS.map((t) => el('button', {
+  'data-t': t, onclick: () => loadLearnStock(t),
+}, t.split(' ')[0])));
+$('btn-load-stock').addEventListener('click', () => loadLearnStock($('s-ticker').value.trim()));
+$('s-ticker').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadLearnStock($('s-ticker').value.trim());
 });
 
 learnSim();
 showTab('learn');
+loadLearnStock('NVDA UW');     // 先以示意價渲染，行情回來再更新

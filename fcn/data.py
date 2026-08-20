@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -81,6 +82,11 @@ class Bars:
 
 
 def _http_get(url: str, timeout: int = 30, retries: int = 4) -> bytes:
+    """向 Yahoo 取資料，暫時性錯誤才重試。
+
+    404（查無此代碼）重試沒有意義，卻會讓使用者等完整輪退避才看到錯誤；
+    429（流量限制）與連線層錯誤才值得重試。
+    """
     last: Exception | None = None
     for attempt in range(retries):
         for host in _HOSTS:
@@ -96,6 +102,10 @@ def _http_get(url: str, timeout: int = 30, retries: int = 4) -> bytes:
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     return resp.read()
+            except urllib.error.HTTPError as exc:
+                if 400 <= exc.code < 500 and exc.code != 429:
+                    raise RuntimeError(f"Yahoo Finance 查無此標的（HTTP {exc.code}）") from None
+                last = exc
             except Exception as exc:  # noqa: BLE001 - 逐一嘗試各主機後再拋出
                 last = exc
         time.sleep(2 ** attempt)

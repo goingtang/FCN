@@ -1183,6 +1183,252 @@ function drawLearnChart(cpn, strike, ki, final, breached, spot) {
   ]));
 }
 
+/* ====================== 分享圖（下載 PNG） ====================== */
+
+// 匯出的圖不跟隨深色模式：同一組條件分享出去必須每次都長一樣，
+// 所以這裡用固定的亮色調色盤，而不是讀 CSS 變數。
+// 字型堆疊一律用單引號，序列化成 XML 屬性時才不會被跳脫成 &quot;。
+const CARD = {
+  w: 1000, h: 1180, pad: 48,
+  bg: '#ffffff', panel: '#f5f6f8', line: '#dde1e7',
+  ink: '#1b1f26', ink2: '#5a6472', ink3: '#8b95a3',
+  accent: '#c8102e', pos: '#17825a', neg: '#c0392b', warn: '#b7791f',
+  posSoft: '#e6f5ee', negSoft: '#fdedeb',
+  font: "'Noto Sans TC','PingFang TC','Microsoft JhengHei','Hiragino Sans GB',"
+    + "system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif",
+  mono: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+};
+
+/** 分享圖的文字：一律用 <text>，不用 foreignObject（canvas 不保證能光柵化）。 */
+function ct(x, y, s, o = {}) {
+  return svg('text', {
+    x, y, fill: o.fill || CARD.ink,
+    'font-size': o.size || 16,
+    'font-weight': o.weight || 400,
+    'text-anchor': o.anchor || 'start',
+    'font-family': o.mono ? CARD.mono : CARD.font,
+  }, s);
+}
+
+const crect = (x, y, w, h, o = {}) => svg('rect', {
+  x, y, width: w, height: h, rx: o.rx == null ? 10 : o.rx,
+  fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw,
+});
+
+/** 分享圖上的損益圖：與 drawLearnChart 同一條公式，只是自帶配色與尺寸。 */
+function cardChart(g, x, y, w, h, o) {
+  const { cpn, strike, ki, final, breached, spot } = o;
+  const L = x + 70, R = x + w - 16, T = y + 18, B = y + h - 36;
+  const xlo = 0.2, xhi = 1.6;
+  const f = (v) => (breached && v < strike ? v / strike - 1 : 0) + cpn;
+
+  const xs = [];
+  for (let v = xlo; v <= xhi + 1e-9; v += 0.01) xs.push(v);
+  const ys = xs.flatMap((v) => [f(v), v - 1]);
+  let ylo = Math.min(...ys), yhi = Math.max(...ys);
+  const padY = (yhi - ylo) * 0.08;
+  ylo -= padY; yhi += padY;
+
+  const X = (v) => L + ((v - xlo) / (xhi - xlo)) * (R - L);
+  const Y = (v) => B - ((v - ylo) / (yhi - ylo)) * (B - T);
+
+  g.append(crect(x, y, w, h, { fill: CARD.panel }));
+  for (const t of niceTicks(ylo + padY, yhi - padY, 6)) {
+    g.append(svg('line', { x1: L, x2: R, y1: Y(t), y2: Y(t), stroke: CARD.line }));
+    g.append(ct(L - 10, Y(t) + 5, (t * 100).toFixed(0) + '%',
+      { size: 14, fill: CARD.ink2, anchor: 'end', mono: true }));
+  }
+  // X 軸刻度寫死每 20%：niceTicks 在 0.2~1.6 上只會給三格，價位讀不出來
+  for (let t = xlo; t <= xhi + 1e-9; t += 0.2) {
+    g.append(svg('line', {
+      x1: X(t), x2: X(t), y1: T, y2: B, stroke: CARD.line, 'stroke-dasharray': '2 4',
+    }));
+    g.append(ct(X(t), B + 26, num(spot * t, spot >= 100 ? 0 : 1),
+      { size: 14, fill: CARD.ink2, anchor: 'middle', mono: true }));
+  }
+
+  const path = (fn, attrs) => g.append(svg('path', Object.assign({
+    d: xs.map((v, i) => `${i ? 'L' : 'M'}${X(v).toFixed(1)} ${Y(fn(v)).toFixed(1)}`).join(' '),
+    fill: 'none', 'stroke-linejoin': 'round',
+  }, attrs)));
+  path((v) => v - 1, { stroke: CARD.ink3, 'stroke-width': 2, 'stroke-dasharray': '6 5' });
+  path(f, { stroke: CARD.accent, 'stroke-width': 3.5 });
+
+  // 兩條界線的標籤錯開高度：執行價與下限價設得很近時才不會疊在一起
+  [{ v: strike, c: CARD.warn, t: '執行價', dy: 18 },
+    { v: ki, c: CARD.neg, t: '下限價', dy: 40 }].forEach((b) => {
+    g.append(svg('line', {
+      x1: X(b.v), x2: X(b.v), y1: T, y2: B,
+      stroke: b.c, 'stroke-width': 1.5, 'stroke-dasharray': '5 4',
+    }));
+    g.append(ct(X(b.v) + 7, T + b.dy, `${b.t} ${num(spot * b.v)}`,
+      { size: 14, weight: 600, fill: b.c }));
+  });
+  // 目前設定的兩個點；白色外框是為了壓在格線上仍看得出來
+  for (const m of [{ y: f(final), c: CARD.accent }, { y: final - 1, c: CARD.ink3 }]) {
+    g.append(svg('circle', {
+      cx: X(final), cy: Y(m.y), r: 7, fill: m.c, stroke: '#ffffff', 'stroke-width': 2.5,
+    }));
+  }
+}
+
+/** 依目前滑桿狀態組出一張分享用 SVG（獨立於畫面上的版面）。 */
+function buildShareSvg() {
+  const cpn = +$('s-cpn').value / 100;
+  const strike = +$('s-strike').value / 100;
+  const ki = +$('s-ki').value / 100;
+  const final = +$('s-final').value / 100;
+  const breached = $('s-breach').checked;
+  const spot = learnStock.price;
+
+  const r = learnOutcome(cpn, strike, final, breached, spot);
+  const hold = final - 1;
+  const gap = r.ret - hold;
+  const sym = learnStock.live ? learnStock.symbol : '示意標的';
+
+  const W = CARD.w, P = CARD.pad, CW = W - P * 2;
+  const g = svg('svg', { width: W, height: CARD.h, viewBox: `0 0 ${W} ${CARD.h}` });
+  g.append(crect(0, 0, W, CARD.h, { fill: CARD.bg, rx: 0 }));
+
+  // 抬頭
+  g.append(ct(P, 62, 'FCN 情境試算', { size: 34, weight: 700 }));
+  g.append(ct(W - P, 62, new Date().toLocaleDateString('en-CA'),
+    { size: 15, fill: CARD.ink3, anchor: 'end', mono: true }));
+  g.append(ct(P, 92, '固定配息 ＋ 到期可能承接股票的結構型商品', { size: 16, fill: CARD.ink2 }));
+  g.append(svg('line', { x1: P, x2: W - P, y1: 116, y2: 116, stroke: CARD.line }));
+
+  // 標的
+  g.append(ct(P, 154, sym, { size: 26, weight: 700 }));
+  g.append(ct(P, 182, learnStock.live
+    ? `${learnStock.name || ''}　現價 ${num(spot)}`
+    : '尚未載入行情，以每股 100 元的示意價試算', { size: 16, fill: CARD.ink2 }));
+
+  // 條件
+  const bw = (CW - 42) / 4;
+  [['年化配息', pct(cpn, 1), `每年 ${money(NOTIONAL * cpn)}`],
+    ['執行價', pct(strike, 0), num(spot * strike)],
+    ['下限價', pct(ki, 0), num(spot * ki)],
+    ['到期股價', pct(final, 0), num(spot * final)],
+  ].forEach(([lbl, val, sub], i) => {
+    const bx = P + i * (bw + 14);
+    g.append(crect(bx, 204, bw, 100, { fill: CARD.panel }));
+    g.append(ct(bx + 16, 234, lbl, { size: 15, fill: CARD.ink2 }));
+    g.append(ct(bx + 16, 268, val, { size: 26, weight: 700, mono: true }));
+    g.append(ct(bx + 16, 292, sub, { size: 15, fill: CARD.ink3, mono: true }));
+  });
+
+  // 情境
+  g.append(crect(P, 324, CW, 54, { fill: r.deliver ? CARD.negSoft : CARD.posSoft }));
+  g.append(ct(W / 2, 359,
+    `${breached ? '期間曾跌破下限價' : '期間未跌破下限價'}　→　${r.scenario}`,
+    { size: 21, weight: 600, anchor: 'middle', fill: r.deliver ? CARD.neg : CARD.pos }));
+
+  // 兩側對照
+  const pw = (CW - 24) / 2;
+  for (const p of [
+    {
+      x: P, lbl: '投資 FCN', ret: r.ret, bar: CARD.accent,
+      amt: `${money(NOTIONAL)} → ${money(r.value)}`,
+      lines: r.deliver
+        ? [`承接 ${sym} ${num(r.shares, 1)} 股 @ ${num(spot * strike)}`,
+          `市值 ${money(r.stockValue)}　＋配息 ${money(r.coupon)}`]
+        : [`本金 ${money(NOTIONAL)}　＋配息 ${money(r.coupon)}`],
+    },
+    {
+      x: P + pw + 24, lbl: '直接買股票', ret: hold, bar: CARD.ink3,
+      amt: `${money(NOTIONAL)} → ${money(NOTIONAL * final)}`,
+      lines: [`${num(NOTIONAL / spot, 1)} 股 @ ${num(spot)}`, `→ 每股 ${num(spot * final)}`],
+    },
+  ]) {
+    g.append(crect(p.x, 400, pw, 228, { fill: CARD.panel }));
+    g.append(crect(p.x, 400, 5, 228, { fill: p.bar, rx: 2 }));
+    g.append(ct(p.x + 26, 438, p.lbl, { size: 17, weight: 600, fill: CARD.ink2 }));
+    g.append(ct(p.x + 26, 504, pctS(p.ret), {
+      size: 50, weight: 700, mono: true, fill: p.ret >= 0 ? CARD.pos : CARD.neg,
+    }));
+    g.append(ct(p.x + 26, 546, p.amt, { size: 20, weight: 600, mono: true }));
+    p.lines.forEach((s, i) => g.append(
+      ct(p.x + 26, 584 + i * 26, s, { size: 16, fill: CARD.ink2 })));
+  }
+
+  g.append(ct(W / 2, 666, gap >= 0
+    ? `這個情境下 FCN 勝出 ${pct(gap)}（多賺 ${money(gap * NOTIONAL)}）`
+    : `這個情境下 FCN 落後 ${pct(-gap)}（少賺 ${money(-gap * NOTIONAL)}，這是放棄上檔的代價）`,
+    { size: 18, weight: 600, anchor: 'middle', fill: gap >= 0 ? CARD.pos : CARD.neg }));
+
+  cardChart(g, P, 690, CW, 340, { cpn, strike, ki, final, breached, spot });
+
+  let lx = P;
+  for (const [name, color, dash] of [
+    ['FCN', CARD.accent, false], ['直接買股票', CARD.ink3, true],
+    ['執行價', CARD.warn, true], ['下限價', CARD.neg, true],
+  ]) {
+    g.append(svg('line', {
+      x1: lx, x2: lx + 24, y1: 1050, y2: 1050,
+      stroke: color, 'stroke-width': 3, 'stroke-dasharray': dash ? '5 4' : null,
+    }));
+    g.append(ct(lx + 32, 1055, name, { size: 15, fill: CARD.ink2 }));
+    lx += 32 + name.length * 15 + 28;
+  }
+
+  // 分享出去的圖會脫離網頁脈絡，風險揭露必須跟著圖走
+  g.append(svg('line', { x1: P, x2: W - P, y1: 1082, y2: 1082, stroke: CARD.line }));
+  [
+    '本圖為到期情境試算，不含提前出場、匯率、稅負與費用，也未反映發行機構信用風險。',
+    'FCN 不保本、報酬封頂於配息；跌破下限價且期末低於執行價時，將以執行價承接最差表現標的。',
+    '僅供教育用途，不構成投資建議，亦非任何商品之報價。',
+  ].forEach((s, i) => g.append(ct(P, 1110 + i * 24, s, { size: 14, fill: CARD.ink3 })));
+
+  return g;
+}
+
+function shareFileName() {
+  const s = (learnStock.live ? learnStock.symbol : 'DEMO').replace(/[^\w.-]/g, '');
+  return `FCN_${s}_${new Date().toLocaleDateString('en-CA').replace(/-/g, '')}.png`;
+}
+
+async function downloadSharePng() {
+  const btn = $('btn-png');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '產生中…';
+  try {
+    const src = new XMLSerializer().serializeToString(buildShareSvg());
+    const img = new Image();
+    await new Promise((ok, fail) => {
+      img.onload = ok;
+      img.onerror = () => fail(new Error('SVG 無法載入'));
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+    });
+
+    const scale = 2;            // 2 倍解析度，貼進簡報或社群才不會糊
+    const cv = el('canvas');
+    cv.width = CARD.w * scale;
+    cv.height = CARD.h * scale;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = CARD.bg;    // PNG 有透明通道，先鋪白底
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+
+    const blob = await new Promise((ok) => cv.toBlob(ok, 'image/png'));
+    if (!blob) throw new Error('canvas 轉檔失敗');
+    const href = URL.createObjectURL(blob);
+    const a = el('a', { href, download: shareFileName() });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+  } catch (e) {
+    btn.textContent = '產生失敗，請再試一次';
+    setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 2500);
+    return;
+  }
+  btn.textContent = label;
+  btn.disabled = false;
+}
+
+$('btn-png').addEventListener('click', downloadSharePng);
+
 ['s-cpn', 's-final'].forEach((id) => $(id).addEventListener('input', learnSim));
 $('s-breach').addEventListener('change', learnSim);
 $('btn-goto-quote').addEventListener('click', () => showTab('quote'));

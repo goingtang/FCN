@@ -48,7 +48,7 @@ def test_terms_panel_is_hidden_on_the_learn_tab():
     ["s-cpn", "s-strike", "s-ki", "s-final", "s-breach",
      "l-cpn", "l-strike", "l-ki", "l-final", "l-buffer",
      "v-scenario", "v-fcn", "v-hold", "v-delta", "v-chart",
-     "v-fcn-detail", "v-hold-detail", "btn-goto-quote"],
+     "v-fcn-detail", "v-hold-detail", "btn-goto-quote", "btn-png"],
 )
 def test_interactive_elements_exist(eid):
     assert f'id="{eid}"' in HTML, f"教學頁缺少元素 {eid}"
@@ -249,3 +249,63 @@ def test_delivery_shows_share_count_with_a_decimal():
 def test_ticker_picker_is_wired_to_the_shared_datalist():
     m = re.search(r'<input id="s-ticker"[^>]*>', HTML)
     assert m and 'list="ticker-list"' in m.group(0)
+
+
+def test_key_amount_lines_are_at_least_16px():
+    """使用者指定：金額那兩行的字級不得低於 16px。"""
+    for sel in (r"\.side \.sub", r"\.side \.amt"):
+        block = re.search(rf"{sel} \{{(.*?)\}}", CSS, re.S)
+        assert block, f"找不到 {sel} 的樣式"
+        size = re.search(r"font-size:\s*(\d+)px", block.group(1))
+        assert size and int(size.group(1)) >= 16, f"{sel} 字級小於 16px"
+
+
+# --------------------------------------------------------------------------
+# 分享圖（PNG 下載）
+# --------------------------------------------------------------------------
+
+SHARE_JS = JS[JS.index("/* ====================== 分享圖"):]
+
+
+def test_share_card_is_wired_to_the_button():
+    assert "function buildShareSvg" in SHARE_JS
+    assert re.search(r"\$\('btn-png'\)\.addEventListener\('click',\s*downloadSharePng\)", JS)
+
+
+def test_share_card_does_not_follow_the_dark_theme():
+    """匯出圖若跟著深色模式跑，同一組條件分享出去會長得不一樣。"""
+    assert "css(" not in SHARE_JS, "分享圖不應讀取 CSS 主題變數"
+    assert re.search(r"CARD\s*=\s*\{", JS)
+
+
+def test_share_card_avoids_foreign_object():
+    """foreignObject 在 canvas 光柵化時不保證會畫出來，只能用 <text>。"""
+    assert "svg('foreignObject'" not in JS and "<foreignObject" not in JS
+
+
+def test_share_card_carries_the_risk_disclosure():
+    """圖被分享出去就脫離了網頁脈絡，風險揭露必須印在圖上。"""
+    for must in ("不保本", "封頂", "不構成投資建議", "信用風險"):
+        assert must in SHARE_JS, f"分享圖缺少揭露：{must}"
+
+
+def test_share_card_payoff_matches_the_page():
+    """卡片上的損益線必須與 learnOutcome 同一條規則（破下限價且低於執行價才承接）。"""
+    assert re.search(r"breached\s*&&\s*v\s*<\s*strike\s*\?\s*v\s*/\s*strike\s*-\s*1\s*:\s*0",
+                     SHARE_JS)
+
+
+def test_share_file_name_is_identifiable():
+    assert re.search(r"`FCN_\$\{s\}_", SHARE_JS)
+    assert ".png" in SHARE_JS
+
+
+def test_png_is_rendered_on_an_opaque_background():
+    """PNG 有透明通道；不先鋪底色，貼到深色簡報上文字會看不見。"""
+    assert "fillRect" in SHARE_JS
+    assert re.search(r"ctx\.fillStyle\s*=\s*CARD\.bg", SHARE_JS)
+
+
+def test_png_is_exported_above_screen_resolution():
+    assert re.search(r"const scale\s*=\s*[2-4]\b", SHARE_JS)
+    assert re.search(r"cv\.width\s*=\s*CARD\.w \* scale", SHARE_JS)

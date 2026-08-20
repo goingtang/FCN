@@ -388,7 +388,11 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; padding: 24px
 .side.fcn { background: var(--accent-soft); border-color: var(--accent); }
 .side .lbl { font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
 .side .big { font-size: 30px; font-weight: 700; font-family: var(--mono); letter-spacing: -1px; }
-.side .sub { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; font-family: var(--mono); }
+/* 這兩行是投資人真正在讀的金額，字級不低於 16px */
+.side .sub {
+  font-size: 16px; line-height: 1.55; color: var(--ink-2); margin-top: 8px;
+  font-family: var(--mono); white-space: normal; word-break: break-word;
+}
 .vs { color: var(--ink-3); font-size: 13px; }
 .delta {
   text-align: center; margin-top: 14px; font-size: 13.5px;
@@ -465,7 +469,8 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; padding: 24px
   color: var(--ink-2); line-height: 1.7;
 }
 .side .amt {
-  font-size: 13px; font-family: var(--mono); color: var(--ink-2); margin-top: 6px;
+  font-size: 16px; font-weight: 600; font-family: var(--mono);
+  color: var(--ink); margin-top: 8px;
 }
 #v-ko-note:empty { display: none; }
 tr.here td { background: var(--line-2) !important; font-weight: 600; }
@@ -496,3 +501,7 @@ tr.here td { background: var(--line-2) !important; font-weight: 600; }
 .stockinfo.bad { color: var(--bad); }
 .slider small b { font-family: var(--mono); color: var(--ink); }
 #l-table-sym { font-weight: 400; color: var(--ink-3); }
+
+/* 分享圖下載 */
+.dl { display: flex; justify-content: flex-end; margin-top: 12px; }
+.dl button { font-size: 13px; }

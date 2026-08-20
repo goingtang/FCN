@@ -1022,7 +1022,7 @@ async function loadLearnStock(ticker) {
     const j = await r.json();
     const t = (j.tickers || [])[0];
     if (!r.ok || !t || !t.ok) throw new Error((t && t.error) || j.error || '查無此標的');
-    learnStock = { symbol: t.symbol, name: t.name, price: t.last, live: true };
+    learnStock = { symbol: t.symbol, name: t.name, price: t.last, live: true, date: t.last_date };
     setStockInfo(
       `<b>${t.symbol}</b> ${t.name || ''}<br>`
       + `現價 <span class="px">${num(t.last)}</span> ${t.currency}`
@@ -1214,14 +1214,15 @@ function drawLearnChart(cpn, strike, ki, final, breached, spot) {
 // 所以這裡用固定的亮色調色盤，而不是讀 CSS 變數。
 // 字型堆疊一律用單引號，序列化成 XML 屬性時才不會被跳脫成 &quot;。
 const CARD = {
-  w: 1000, h: 1180, pad: 48,
-  bg: '#ffffff', panel: '#f5f6f8', line: '#dde1e7',
+  w: 1440, pad: 40, colL: 340, gap: 28,
+  bg: '#ffffff', panel: '#f7f8fa', border: '#e4e7ec', track: '#dfe3e9',
+  market: '#fdf6e9', marketLine: '#e3c689',
   ink: '#1b1f26', ink2: '#5a6472', ink3: '#8b95a3',
   accent: '#c8102e', pos: '#17825a', neg: '#c0392b', warn: '#b7791f',
   posSoft: '#e6f5ee', negSoft: '#fdedeb',
   font: "'Noto Sans TC','PingFang TC','Microsoft JhengHei','Hiragino Sans GB',"
     + "system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif",
-  mono: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+  mono: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
 };
 
 /** 分享圖的文字：一律用 <text>，不用 foreignObject（canvas 不保證能光柵化）。 */
@@ -1239,6 +1240,118 @@ const crect = (x, y, w, h, o = {}) => svg('rect', {
   x, y, width: w, height: h, rx: o.rx == null ? 10 : o.rx,
   fill: o.fill || 'none', stroke: o.stroke, 'stroke-width': o.sw,
 });
+
+// SVG 沒有自動斷行，字寬只能估：全形字約一個字級寬，半形約 0.55。
+const textW = (s, size) => [...s].reduce(
+  (w, ch) => w + size * (/[\x00-\xff]/.test(ch) ? 0.55 : 1), 0);
+
+/** 中文逐字斷行，英數以單詞為單位，夠用於卡片上的短句。 */
+function wrapText(s, maxW, size) {
+  const out = [];
+  let line = '';
+  for (const tk of (s || '').match(/[A-Za-z0-9][A-Za-z0-9.,%$+\-/]*|[\s\S]/g) || []) {
+    if (!line && /\s/.test(tk)) continue;              // 行首不留空白
+    if (line && textW(line + tk, size) > maxW) {
+      out.push(line);
+      line = /\s/.test(tk) ? '' : tk;
+    } else {
+      line += tk;
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/**
+ * 以全形空白為優先斷點：「市值 43,750」這種一組的字不該被拆到兩行。
+ */
+function wrapSegments(s, maxW, size) {
+  const out = [];
+  let line = '';
+  for (const seg of (s || '').split('　')) {
+    const joined = line ? `${line}　${seg}` : seg;
+    if (line && textW(joined, size) > maxW) { out.push(line); line = seg; } else line = joined;
+  }
+  if (line) out.push(line);
+  return out.flatMap((l) => wrapText(l, maxW, size));   // 單段仍過長才逐字斷
+}
+
+/** 畫一段會自動斷行的文字，回傳下一行的基線 y。 */
+function ctWrap(g, x, y, s, maxW, o = {}) {
+  const size = o.size || 14;
+  const lh = o.lh || Math.round(size * 1.55);
+  for (const ln of (o.seg ? wrapSegments : wrapText)(s, maxW, size)) {
+    g.append(ct(x, y, ln, o));
+    y += lh;
+  }
+  return y;
+}
+
+/**
+ * 畫一個面板：先把內容畫進暫存群組量出高度，再補上底框。
+ * draw(g, x, y, w) 需回傳最後一行的基線 y。
+ */
+function cardPanel(g, x, y, w, o, draw) {
+  const grp = svg('g');
+  const end = draw(grp, x + 16, y + 28, w - 32);
+  const h = end - y + 14;
+  g.append(crect(x, y, w, h, o));
+  g.append(grp);
+  return h;
+}
+
+/** 面板小標題（含右側灰字說明），回傳下一行基線 y。 */
+function cardHead(g, x, y, title, note) {
+  g.append(ct(x, y, title, { size: 14, weight: 700 }));
+  if (note) g.append(ct(x + textW(title, 14) + 10, y, note, { size: 12, fill: CARD.ink3 }));
+  return y + 30;
+}
+
+// 頁面上的滑桿：標題、數值、說明都直接讀 DOM，卡片才不會跟畫面各說各話
+function sliderSpec(id) {
+  const inp = $(id);
+  const box = inp.closest('.slider');
+  return {
+    frac: (+inp.value - +inp.min) / (+inp.max - +inp.min),
+    label: box.querySelector('label').firstChild.textContent.trim(),
+    value: box.querySelector('output').textContent.trim(),
+    sub: box.querySelector('small').textContent.replace(/[ \t\r\n]+/g, ' ').trim(),
+  };
+}
+
+/** 畫一支滑桿（軌道＋滑鈕＋說明），回傳下一行基線 y。 */
+function cardSlider(g, x, y, w, id) {
+  const s = sliderSpec(id);
+  g.append(ct(x, y, s.label, { size: 14, fill: CARD.ink2 }));
+  g.append(ct(x + w, y, s.value, {
+    size: 16, weight: 700, anchor: 'end', mono: true, fill: CARD.accent,
+  }));
+  const ty = y + 14;
+  const kx = x + w * s.frac;
+  g.append(svg('rect', { x, y: ty, width: w, height: 6, rx: 3, fill: CARD.track }));
+  g.append(svg('rect', { x, y: ty, width: Math.max(6, w * s.frac), height: 6, rx: 3, fill: CARD.accent }));
+  g.append(svg('circle', {
+    cx: kx, cy: ty + 3, r: 8, fill: CARD.accent, stroke: '#ffffff', 'stroke-width': 2,
+  }));
+  return ctWrap(g, x, ty + 28, s.sub, w, { size: 13, fill: CARD.ink3, lh: 18 }) + 16;
+}
+
+/** 勾選框：畫成方框＋勾勾，鎖住時用灰色。 */
+function cardCheck(g, x, y, w, label, checked, disabled) {
+  const c = disabled ? CARD.ink3 : CARD.accent;
+  g.append(crect(x, y - 12, 16, 16, {
+    rx: 3, fill: checked ? c : CARD.bg, stroke: checked ? c : CARD.track, sw: 1.5,
+  }));
+  if (checked) {
+    g.append(svg('path', {
+      d: `M${x + 4} ${y - 4}L${x + 7} ${y - 1}L${x + 12} ${y - 8}`,
+      fill: 'none', stroke: '#ffffff', 'stroke-width': 2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    }));
+  }
+  g.append(ct(x + 26, y, label, { size: 14, fill: disabled ? CARD.ink3 : CARD.ink }));
+  return y + 22;
+}
 
 /** 分享圖上的損益圖：與 drawLearnChart 同一條公式，只是自帶配色與尺寸。 */
 function cardChart(g, x, y, w, h, o) {
@@ -1259,14 +1372,14 @@ function cardChart(g, x, y, w, h, o) {
 
   g.append(crect(x, y, w, h, { fill: CARD.panel }));
   for (const t of niceTicks(ylo + padY, yhi - padY, 6)) {
-    g.append(svg('line', { x1: L, x2: R, y1: Y(t), y2: Y(t), stroke: CARD.line }));
+    g.append(svg('line', { x1: L, x2: R, y1: Y(t), y2: Y(t), stroke: CARD.border }));
     g.append(ct(L - 10, Y(t) + 5, (t * 100).toFixed(0) + '%',
       { size: 14, fill: CARD.ink2, anchor: 'end', mono: true }));
   }
   // X 軸刻度寫死每 20%：niceTicks 在 0.2~1.6 上只會給三格，價位讀不出來
   for (let t = xlo; t <= xhi + 1e-9; t += 0.2) {
     g.append(svg('line', {
-      x1: X(t), x2: X(t), y1: T, y2: B, stroke: CARD.line, 'stroke-dasharray': '2 4',
+      x1: X(t), x2: X(t), y1: T, y2: B, stroke: CARD.border, 'stroke-dasharray': '2 4',
     }));
     g.append(ct(X(t), B + 26, num(spot * t, spot >= 100 ? 0 : 1),
       { size: 14, fill: CARD.ink2, anchor: 'middle', mono: true }));
@@ -1297,7 +1410,12 @@ function cardChart(g, x, y, w, h, o) {
   }
 }
 
-/** 依目前滑桿狀態組出一張分享用 SVG（獨立於畫面上的版面）。 */
+// 面板上的文字一律從畫面讀，卡片才是「畫面的完整翻拍」而不是另一套算法
+const domText = (id) => ($(id).textContent || '').replace(/[ \t\r\n]+/g, ' ').trim();
+const domColor = (id) => ($(id).classList.contains('neg') ? CARD.neg
+  : $(id).classList.contains('pos') ? CARD.pos : CARD.ink);
+
+/** 把整個模擬器（左側條件 ＋ 右側結果）組成一張完整的分享圖。 */
 function buildShareSvg() {
   const cpn = +$('s-cpn').value / 100;
   const strike = +$('s-strike').value / 100;
@@ -1307,104 +1425,133 @@ function buildShareSvg() {
   // 期末價低於下限價就一定觸發過，勾選框是否被鎖住不影響這張圖的判斷
   const breached = $('s-breach').checked || final < ki;
 
-  const r = learnOutcome(cpn, strike, ki, final, breached, spot);
-  const hold = final - 1;
-  const gap = r.ret - hold;
-  const sym = learnStock.live ? learnStock.symbol : '示意標的';
-
-  const W = CARD.w, P = CARD.pad, CW = W - P * 2;
-  const g = svg('svg', { width: W, height: CARD.h, viewBox: `0 0 ${W} ${CARD.h}` });
-  g.append(crect(0, 0, W, CARD.h, { fill: CARD.bg, rx: 0 }));
+  const W = CARD.w, P = CARD.pad;
+  const LW = CARD.colL, RX = P + LW + CARD.gap, RW = W - P - RX;
+  const g = svg('svg', {});
 
   // 抬頭
-  g.append(ct(P, 62, 'FCN 情境試算', { size: 34, weight: 700 }));
-  g.append(ct(W - P, 62, new Date().toLocaleDateString('en-CA'),
+  g.append(ct(P, 58, 'FCN 情境試算', { size: 32, weight: 700 }));
+  g.append(ct(W - P, 58, new Date().toLocaleDateString('en-CA'),
     { size: 15, fill: CARD.ink3, anchor: 'end', mono: true }));
-  g.append(ct(P, 92, '固定配息 ＋ 到期可能承接股票的結構型商品', { size: 16, fill: CARD.ink2 }));
-  g.append(svg('line', { x1: P, x2: W - P, y1: 116, y2: 116, stroke: CARD.line }));
+  g.append(ct(P, 88, `以 ${money(NOTIONAL)} 美元投入、12 個月、每月配息為例`,
+    { size: 15, fill: CARD.ink2 }));
+  g.append(svg('line', { x1: P, x2: W - P, y1: 110, y2: 110, stroke: CARD.border }));
 
-  // 標的
-  g.append(ct(P, 154, sym, { size: 26, weight: 700 }));
-  g.append(ct(P, 182, learnStock.live
-    ? `${learnStock.name || ''}　現價 ${num(spot)}`
-    : '尚未載入行情，以每股 100 元的示意價試算', { size: 16, fill: CARD.ink2 }));
+  const TOP = 134;
 
-  // 條件
-  const bw = (CW - 42) / 4;
-  [['年化配息', pct(cpn, 1), `每年 ${money(NOTIONAL * cpn)}`],
-    ['執行價', pct(strike, 0), num(spot * strike)],
-    ['下限價', pct(ki, 0), num(spot * ki)],
-    ['到期股價', pct(final, 0), num(spot * final)],
-  ].forEach(([lbl, val, sub], i) => {
-    const bx = P + i * (bw + 14);
-    g.append(crect(bx, 204, bw, 100, { fill: CARD.panel }));
-    g.append(ct(bx + 16, 234, lbl, { size: 15, fill: CARD.ink2 }));
-    g.append(ct(bx + 16, 268, val, { size: 26, weight: 700, mono: true }));
-    g.append(ct(bx + 16, 292, sub, { size: 15, fill: CARD.ink3, mono: true }));
-  });
+  /* ---------- 左：條件設定 ---------- */
+  let yL = TOP;
+  yL += cardPanel(g, P, yL, LW, { fill: CARD.bg, stroke: CARD.border }, (gg, x, y, w) => {
+    y = cardHead(gg, x, y, '連結標的', '用真實股價試算');
+    gg.append(ct(x, y, learnStock.live ? learnStock.symbol : '示意標的',
+      { size: 20, weight: 700 }));
+    y += 22;
+    y = ctWrap(gg, x, y, learnStock.name || '', w, { size: 13, fill: CARD.ink2, lh: 18 });
+    gg.append(ct(x, y + 6, learnStock.live
+      ? `現價 ${num(spot)} USD　${learnStock.date} 收盤`
+      : '未取得行情，以每股 100 元示意價試算', { size: 15, weight: 600, mono: true }));
+    return y + 6;
+  }) + 14;
 
-  // 情境
-  g.append(crect(P, 324, CW, 54, { fill: r.deliver ? CARD.negSoft : CARD.posSoft }));
-  g.append(ct(W / 2, 359,
-    `${breached ? '期間曾跌破下限價' : '期間未跌破下限價'}　→　${r.scenario}`,
-    { size: 21, weight: 600, anchor: 'middle', fill: r.deliver ? CARD.neg : CARD.pos }));
+  yL += cardPanel(g, P, yL, LW, { fill: CARD.bg, stroke: CARD.border }, (gg, x, y, w) => {
+    y = cardHead(gg, x, y, '① 商品條件', '跟券商談的');
+    for (const id of ['s-cpn', 's-strike', 's-ki']) y = cardSlider(gg, x, y, w, id);
+    return y - 22;
+  }) + 14;
 
-  // 兩側對照
-  const pw = (CW - 24) / 2;
-  for (const p of [
-    {
-      x: P, lbl: '投資 FCN', ret: r.ret, bar: CARD.accent,
-      amt: `${money(NOTIONAL)} → ${money(r.value)}`,
-      lines: r.deliver
-        ? [`承接 ${sym} ${num(r.shares, 1)} 股 @ ${num(spot * strike)}`,
-          `市值 ${money(r.stockValue)}　＋配息 ${money(r.coupon)}`]
-        : [`本金 ${money(NOTIONAL)}　＋配息 ${money(r.coupon)}`],
-    },
-    {
-      x: P + pw + 24, lbl: '直接買股票', ret: hold, bar: CARD.ink3,
-      amt: `${money(NOTIONAL)} → ${money(NOTIONAL * final)}`,
-      lines: [`${num(NOTIONAL / spot, 1)} 股 @ ${num(spot)}`, `→ 每股 ${num(spot * final)}`],
-    },
-  ]) {
-    g.append(crect(p.x, 400, pw, 228, { fill: CARD.panel }));
-    g.append(crect(p.x, 400, 5, 228, { fill: p.bar, rx: 2 }));
-    g.append(ct(p.x + 26, 438, p.lbl, { size: 17, weight: 600, fill: CARD.ink2 }));
-    g.append(ct(p.x + 26, 504, pctS(p.ret), {
-      size: 50, weight: 700, mono: true, fill: p.ret >= 0 ? CARD.pos : CARD.neg,
+  yL += cardPanel(g, P, yL, LW,
+    { fill: CARD.market, stroke: CARD.marketLine }, (gg, x, y, w) => {
+      y = cardHead(gg, x, y, '② 市場情境', '你要猜的');
+      y = cardSlider(gg, x, y, w, 's-final');
+      y = cardCheck(gg, x, y, w, '期間曾跌破下限價',
+        $('s-breach').checked, $('s-breach').disabled);
+      const note = domText('s-breach-note');
+      if (note) y = ctWrap(gg, x, y + 6, note, w, { size: 12, fill: CARD.warn, lh: 17 });
+      return ctWrap(gg, x, y + 6, domText('sim-onlythis'), w,
+        { size: 12, fill: CARD.ink3, lh: 17 }) - 17;
+    });
+
+  /* ---------- 右：結果 ---------- */
+  let yR = TOP;
+  const band = domText('v-scenario');
+  const deliver = band.startsWith('D');
+  g.append(crect(RX, yR, RW, 52, { fill: deliver ? CARD.negSoft : CARD.posSoft }));
+  g.append(ct(RX + RW / 2, yR + 34, band, {
+    size: 21, weight: 700, anchor: 'middle', fill: deliver ? CARD.neg : CARD.pos,
+  }));
+  yR += 52 + 20;
+
+  const pw = (RW - 24) / 2;
+  const sides = [
+    { x: RX, id: 'fcn', lbl: '投資 FCN', bar: CARD.accent },
+    { x: RX + pw + 24, id: 'hold', lbl: '直接買股票', bar: CARD.ink3 },
+  ].map((s) => {
+    const grp = svg('g');
+    const x = s.x + 26;
+    const w = pw - 52;
+    grp.append(ct(x, yR + 34, s.lbl, { size: 16, weight: 600, fill: CARD.ink2 }));
+    grp.append(ct(x, yR + 96, domText(`v-${s.id}`), {
+      size: 46, weight: 700, mono: true, fill: domColor(`v-${s.id}`),
     }));
-    g.append(ct(p.x + 26, 546, p.amt, { size: 20, weight: 600, mono: true }));
-    p.lines.forEach((s, i) => g.append(
-      ct(p.x + 26, 584 + i * 26, s, { size: 16, fill: CARD.ink2 })));
+    grp.append(ct(x, yR + 136, domText(`v-${s.id}-amt`), { size: 20, weight: 600, mono: true }));
+    const end = ctWrap(grp, x, yR + 172, domText(`v-${s.id}-detail`), w,
+      { size: 16, fill: CARD.ink2, lh: 26, seg: true });
+    return { s, grp, end };
+  });
+  const ph = Math.max(...sides.map((o) => o.end)) - yR + 4;
+  for (const o of sides) {
+    g.append(crect(o.s.x, yR, pw, ph, { fill: CARD.panel }));
+    g.append(crect(o.s.x, yR, 5, ph, { fill: o.s.bar, rx: 2 }));
+    g.append(o.grp);
   }
+  g.append(ct(RX + RW / 2, yR + ph / 2 + 6, 'vs',
+    { size: 14, anchor: 'middle', fill: CARD.ink3 }));
+  yR += ph + 34;
 
-  g.append(ct(W / 2, 666, gap >= 0
-    ? `這個情境下 FCN 勝出 ${pct(gap)}（多賺 ${money(gap * NOTIONAL)}）`
-    : `這個情境下 FCN 落後 ${pct(-gap)}（少賺 ${money(-gap * NOTIONAL)}，這是放棄上檔的代價）`,
-    { size: 18, weight: 600, anchor: 'middle', fill: gap >= 0 ? CARD.pos : CARD.neg }));
+  const delta = domText('v-delta');
+  g.append(ct(RX + RW / 2, yR, delta, {
+    size: 18, weight: 600, anchor: 'middle',
+    fill: delta.includes('落後') ? CARD.neg : CARD.pos,
+  }));
+  yR += 12;
+  yR = ctWrap(g, RX, yR + 20, domText('v-ko-note'), RW, { size: 13, fill: CARD.ink3, lh: 19 });
 
-  cardChart(g, P, 690, CW, 340, { cpn, strike, ki, final, breached, spot });
+  const chartH = 330;
+  cardChart(g, RX, yR + 8, RW, chartH, { cpn, strike, ki, final, breached, spot });
+  yR += 8 + chartH + 30;
 
-  let lx = P;
+  let lx = RX;
   for (const [name, color, dash] of [
     ['FCN', CARD.accent, false], ['直接買股票', CARD.ink3, true],
     ['執行價', CARD.warn, true], ['下限價', CARD.neg, true],
   ]) {
     g.append(svg('line', {
-      x1: lx, x2: lx + 24, y1: 1050, y2: 1050,
+      x1: lx, x2: lx + 24, y1: yR - 5, y2: yR - 5,
       stroke: color, 'stroke-width': 3, 'stroke-dasharray': dash ? '5 4' : null,
     }));
-    g.append(ct(lx + 32, 1055, name, { size: 15, fill: CARD.ink2 }));
-    lx += 32 + name.length * 15 + 28;
+    g.append(ct(lx + 32, yR, name, { size: 15, fill: CARD.ink2 }));
+    lx += 32 + textW(name, 15) + 28;
   }
 
-  // 分享出去的圖會脫離網頁脈絡，風險揭露必須跟著圖走
-  g.append(svg('line', { x1: P, x2: W - P, y1: 1082, y2: 1082, stroke: CARD.line }));
-  [
+  /* ---------- 頁尾 ---------- */
+  // 圖被分享出去就脫離了網頁脈絡，風險揭露必須跟著圖走
+  let y = Math.max(yL, yR) + 26;
+  g.append(svg('line', { x1: P, x2: W - P, y1: y, y2: y, stroke: CARD.border }));
+  y += 28;
+  for (const s of [
     '本圖為到期情境試算，不含提前出場、匯率、稅負與費用，也未反映發行機構信用風險。',
     'FCN 不保本、報酬封頂於配息；跌破下限價且期末低於執行價時，將以執行價承接最差表現標的。',
     '僅供教育用途，不構成投資建議，亦非任何商品之報價。',
-  ].forEach((s, i) => g.append(ct(P, 1110 + i * 24, s, { size: 14, fill: CARD.ink3 })));
+  ]) {
+    g.append(ct(P, y, s, { size: 14, fill: CARD.ink3 }));
+    y += 24;
+  }
 
+  const H = Math.round(y + 8);
+  g.setAttribute('width', W);
+  g.setAttribute('height', H);
+  g.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  g.insertBefore(crect(0, 0, W, H, { fill: CARD.bg, rx: 0 }), g.firstChild);
   return g;
 }
 
@@ -1419,7 +1566,10 @@ async function downloadSharePng() {
   btn.disabled = true;
   btn.textContent = '產生中…';
   try {
-    const src = new XMLSerializer().serializeToString(buildShareSvg());
+    const node = buildShareSvg();
+    const w = +node.getAttribute('width');
+    const h = +node.getAttribute('height');
+    const src = new XMLSerializer().serializeToString(node);
     const img = new Image();
     await new Promise((ok, fail) => {
       img.onload = ok;
@@ -1429,8 +1579,8 @@ async function downloadSharePng() {
 
     const scale = 2;            // 2 倍解析度，貼進簡報或社群才不會糊
     const cv = el('canvas');
-    cv.width = CARD.w * scale;
-    cv.height = CARD.h * scale;
+    cv.width = w * scale;
+    cv.height = h * scale;
     const ctx = cv.getContext('2d');
     ctx.fillStyle = CARD.bg;    // PNG 有透明通道，先鋪白底
     ctx.fillRect(0, 0, cv.width, cv.height);

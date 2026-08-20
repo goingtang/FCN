@@ -356,4 +356,37 @@ def test_png_is_rendered_on_an_opaque_background():
 
 def test_png_is_exported_above_screen_resolution():
     assert re.search(r"const scale\s*=\s*[2-4]\b", SHARE_JS)
-    assert re.search(r"cv\.width\s*=\s*CARD\.w \* scale", SHARE_JS)
+    assert re.search(r"cv\.width\s*=\s*w \* scale", SHARE_JS)
+    assert re.search(r"cv\.height\s*=\s*h \* scale", SHARE_JS)
+
+
+def test_share_card_includes_the_condition_column():
+    """使用者要的是「完整的一張圖」：左側條件設定必須跟著出現在匯出圖上。"""
+    for id_ in ("s-cpn", "s-strike", "s-ki", "s-final"):
+        assert f"'{id_}'" in SHARE_JS, f"分享圖缺少滑桿 {id_}"
+    assert "function cardSlider" in SHARE_JS
+    assert "function cardCheck" in SHARE_JS
+    assert "① 商品條件" in SHARE_JS and "② 市場情境" in SHARE_JS
+
+
+def test_share_card_reads_its_text_from_the_page():
+    """卡片是畫面的翻拍，不該另外實作一套格式化，否則兩邊會漸行漸遠。"""
+    assert re.search(r"const domText = ", SHARE_JS)
+    for id_ in ("v-scenario", "v-delta", "v-ko-note", "s-breach-note", "sim-onlythis"):
+        assert f"'{id_}'" in SHARE_JS, f"分享圖未取用畫面上的 {id_}"
+    # 滑桿的標題／數值／說明也一律讀 DOM
+    assert re.search(r"function sliderSpec", SHARE_JS)
+    assert "querySelector('output')" in SHARE_JS
+
+
+def test_share_card_wraps_long_text():
+    """SVG 不會自動斷行；長的公司名與說明必須自行折行，否則會畫出邊界。"""
+    assert "function wrapText" in SHARE_JS
+    assert "function wrapSegments" in SHARE_JS       # 全形空白優先斷點
+    assert "function ctWrap" in SHARE_JS
+
+
+def test_share_card_height_grows_with_content():
+    """條件不同會多出幾行（例如鎖住勾選框的說明），高度必須跟著長。"""
+    assert re.search(r"g\.setAttribute\('height', H\)", SHARE_JS)
+    assert re.search(r"Math\.max\(yL, yR\)", SHARE_JS)

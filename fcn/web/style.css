@@ -314,3 +314,135 @@ footer { text-align: center; color: var(--ink-3); font-size: 12px; padding: 24px
   border-radius: 50%; animation: spin .7s linear infinite; margin-right: 6px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ================= 教學頁 ================= */
+
+.hero {
+  background: linear-gradient(120deg, var(--accent), #8c0b20);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 34px 30px;
+  margin-bottom: 16px;
+}
+.hero h2 { margin: 0 0 10px; font-size: 27px; letter-spacing: .5px; }
+.hero p { margin: 0; font-size: 15px; line-height: 1.8; opacity: .93; }
+
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.step {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px; position: relative;
+}
+.step .n {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; margin-bottom: 10px;
+}
+.step h4 { margin: 0 0 7px; font-size: 15px; }
+.step p { margin: 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.75; }
+
+.benefits { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.benefit {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; background: var(--panel-2);
+}
+.benefit .ico { font-size: 26px; margin-bottom: 8px; }
+.benefit h4 { margin: 0 0 8px; font-size: 16px; }
+.benefit p { margin: 0 0 12px; font-size: 13.5px; color: var(--ink-2); line-height: 1.8; }
+.benefit .tag {
+  display: inline-block; font-size: 11.5px; padding: 3px 9px; border-radius: 99px;
+  background: var(--ok-soft); color: var(--ok); font-weight: 600;
+}
+
+/* 互動試算 */
+.sim { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 20px; }
+@media (max-width: 860px) { .sim { grid-template-columns: 1fr; } }
+.sim-controls {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px;
+}
+.sim-controls hr { border: none; border-top: 1px solid var(--line); margin: 18px 0; }
+.slider { margin-bottom: 16px; }
+.slider label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; color: var(--ink-2); margin-bottom: 7px;
+}
+.slider output { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); }
+.slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.slider small { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 5px; }
+.chk { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+.chk input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+.sim-out {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; background: var(--panel-2);
+}
+.verdict {
+  font-size: 17px; font-weight: 700; margin-bottom: 16px;
+  padding: 9px 14px; border-radius: 6px; text-align: center;
+  background: var(--ok-soft); color: var(--ok);
+}
+.verdict.risk { background: var(--bad-soft); color: var(--bad); }
+.compare { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; }
+.side { text-align: center; padding: 14px 8px; border-radius: var(--radius); border: 1px solid var(--line); }
+.side.fcn { background: var(--accent-soft); border-color: var(--accent); }
+.side .lbl { font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
+.side .big { font-size: 30px; font-weight: 700; font-family: var(--mono); letter-spacing: -1px; }
+.side .sub { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; font-family: var(--mono); }
+.vs { color: var(--ink-3); font-size: 13px; }
+.delta {
+  text-align: center; margin-top: 14px; font-size: 13.5px;
+  padding: 9px; border-radius: 6px; background: var(--panel);
+}
+
+.outcomes { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
+.outcome {
+  border: 1px solid var(--line); border-left: 4px solid var(--ok);
+  border-radius: var(--radius); padding: 16px 18px; background: var(--panel-2);
+}
+.outcome.risk { border-left-color: var(--bad); }
+.oh { font-weight: 600; font-size: 14.5px; margin-bottom: 9px; display: flex; align-items: center; gap: 9px; }
+.badge {
+  width: 24px; height: 24px; border-radius: 6px; background: var(--ok); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+}
+.outcome.risk .badge { background: var(--bad); }
+.outcome p { margin: 0 0 10px; font-size: 13.5px; color: var(--ink-2); line-height: 1.8; }
+.outcome .of { font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 9px; }
+
+.lead { font-size: 16px; margin: 0 0 10px; }
+/* 只放大教學頁的內文；`.panel > p` 的權重高於 `.hint`，不限縮會把
+   其他分頁的提示文字一併撐大 */
+#tab-learn .panel > p:not(.hint):not(.note) {
+  font-size: 14px; line-height: 1.85; color: var(--ink-2);
+}
+.insight { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 16px; }
+.ins { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: var(--radius); padding: 16px; }
+.ins h4 { margin: 0 0 8px; font-size: 14px; color: var(--warn); }
+.ins p { margin: 0; font-size: 13px; line-height: 1.8; color: var(--ink-2); }
+
+.fitgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.fit { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.fit.yes { background: var(--ok-soft); border-color: var(--ok); }
+.fit.no { background: var(--bad-soft); border-color: var(--bad); }
+.fit h4 { margin: 0 0 12px; font-size: 15px; }
+.fit.yes h4 { color: var(--ok); }
+.fit.no h4 { color: var(--bad); }
+.fit ul { margin: 0; padding-left: 20px; }
+.fit li { font-size: 13.5px; line-height: 1.95; color: var(--ink-2); }
+
+.keyq blockquote {
+  margin: 0 0 16px; padding: 22px 26px; border-left: 4px solid var(--accent);
+  background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 18px; line-height: 1.75;
+}
+.keyq blockquote b { color: var(--accent); }
+
+.risks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.risks > div {
+  border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px;
+  background: var(--panel-2); font-size: 13px; line-height: 1.7;
+}
+.risks b { display: block; color: var(--bad); margin-bottom: 3px; font-size: 13.5px; }
+.risks span { color: var(--ink-2); }

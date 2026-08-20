@@ -896,12 +896,20 @@ function renderPath(d) {
 
 /* ====================== 事件綁定 ====================== */
 
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach(
+    (x) => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach(
+    (t) => t.classList.toggle('on', t.id === 'tab-' + name));
+  // 教學頁不需要報價條件表，藏起來避免干擾
+  const learning = name === 'learn';
+  $('terms-panel').style.display = learning ? 'none' : '';
+  $('msg-box').style.display = learning ? 'none' : '';
+  window.scrollTo({ top: 0 });
+}
+
 document.querySelectorAll('nav button').forEach((b) => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b));
-    document.querySelectorAll('.tab').forEach((t) =>
-      t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab));
-  });
+  b.addEventListener('click', () => showTab(b.dataset.tab));
 });
 
 $('f-product').addEventListener('change', syncForm);
@@ -982,3 +990,122 @@ $('btn-preset-upside').addEventListener('click', () => {
 });
 
 syncForm();
+
+
+/* ====================== 教學頁互動試算 ====================== */
+
+const NOTIONAL = 100_000;
+
+/**
+ * 教學頁的即時試算：以最差表現標的的期末表現，算出 FCN 與直接持股的結果。
+ * 與後端 fcn/engine.py 的到期給付規則一致（提前出場另計，此處聚焦到期情境）。
+ */
+function learnSim() {
+  const cpn = +$('s-cpn').value / 100;
+  const strike = +$('s-strike').value / 100;
+  const ki = +$('s-ki').value / 100;
+  const final = +$('s-final').value / 100;
+  const breached = $('s-breach').checked;
+
+  $('l-cpn').textContent = pct(cpn, 1);
+  $('l-strike').textContent = pct(strike, 0);
+  $('l-ki').textContent = pct(ki, 0);
+  $('l-final').textContent = pct(final, 0);
+  $('l-buffer').textContent = pct(1 - strike, 0);
+
+  const coupon = NOTIONAL * cpn;                    // 12 個月、每月配息
+  const deliver = breached && final < strike;
+
+  let scenario, principal, stockValue, ret;
+  if (deliver) {
+    scenario = 'D　到期承接股票';
+    principal = 0;
+    stockValue = NOTIONAL * (final / strike);
+    ret = (stockValue + coupon) / NOTIONAL - 1;
+  } else {
+    scenario = breached ? 'C　到期還本（曾破下限價，期末站回執行價之上）'
+      : (final >= strike ? 'B　到期還本' : 'B　到期還本（未破下限價）');
+    principal = NOTIONAL;
+    stockValue = 0;
+    ret = cpn;
+  }
+  const hold = final - 1;
+
+  $('v-scenario').textContent = scenario;
+  $('v-scenario').className = 'verdict' + (deliver ? ' risk' : '');
+
+  $('v-fcn').textContent = pctS(ret);
+  $('v-fcn').className = 'big ' + (ret >= 0 ? 'pos' : 'neg');
+  $('v-fcn-detail').textContent = deliver
+    ? `股票市值 ${money(stockValue)}　＋配息 ${money(coupon)}`
+    : `本金 ${money(NOTIONAL)}　＋配息 ${money(coupon)}`;
+
+  $('v-hold').textContent = pctS(hold);
+  $('v-hold').className = 'big ' + (hold >= 0 ? 'pos' : 'neg');
+  $('v-hold-detail').textContent = `股票市值 ${money(NOTIONAL * final)}`;
+
+  const gap = ret - hold;
+  $('v-delta').innerHTML = gap >= 0
+    ? `這個情境下 <b class="pos">FCN 勝出 ${pct(gap)}</b>`
+    : `這個情境下 <b class="neg">FCN 落後 ${pct(-gap)}</b>　（放棄的漲幅）`;
+
+  drawLearnChart(cpn, strike, ki, final, breached);
+}
+
+function drawLearnChart(cpn, strike, ki, final, breached) {
+  const xs = [];
+  for (let x = 0.2; x <= 1.601; x += 0.01) xs.push(x);
+  const fcnAt = (x) => (breached && x < strike ? x / strike - 1 : 0) + cpn;
+
+  const vlines = [
+    { x: strike, label: '執行價', color: css('--warn') },
+    { x: ki, label: '下限價', color: css('--bad') },
+  ];
+  const series = [
+    {
+      name: '直接買股票', color: css('--ink-3'), dash: '5 4',
+      points: xs.map((x) => [x, x - 1]),
+    },
+    {
+      name: 'FCN', color: css('--accent'), width: 2.6,
+      points: xs.map((x) => [x, fcnAt(x)]),
+    },
+  ];
+
+  const box = $('v-chart');
+  box.replaceChildren(lineChart({
+    series, vlines, height: 250,
+    xFmt: (v) => (v * 100).toFixed(0) + '%',
+    yFmt: (v) => (v * 100).toFixed(0) + '%',
+    hoverXFmt: (v) => '期末股價 ' + pct(v, 1),
+    hoverYFmt: (v) => pctS(v, 2),
+    markers: [
+      { x: final, y: fcnAt(final), color: css('--accent'), shape: 'o', title: '目前設定' },
+      { x: final, y: final - 1, color: css('--ink-3'), shape: 'o', title: '直接持股' },
+    ],
+  }).firstChild);
+  box.append(legend([
+    { name: 'FCN', color: css('--accent') },
+    { name: '直接買股票', color: css('--ink-3'), dash: true },
+    { name: '執行價', color: css('--warn'), dash: true },
+    { name: '下限價', color: css('--bad'), dash: true },
+  ]));
+}
+
+['s-cpn', 's-strike', 's-ki', 's-final'].forEach(
+  (id) => $(id).addEventListener('input', learnSim));
+$('s-breach').addEventListener('change', learnSim);
+$('btn-goto-quote').addEventListener('click', () => showTab('quote'));
+
+// 下限價不可高於執行價（條款要求），拉動時互相夾住
+$('s-strike').addEventListener('input', () => {
+  if (+$('s-ki').value >= +$('s-strike').value) $('s-ki').value = +$('s-strike').value - 1;
+  learnSim();
+});
+$('s-ki').addEventListener('input', () => {
+  if (+$('s-ki').value >= +$('s-strike').value) $('s-ki').value = +$('s-strike').value - 1;
+  learnSim();
+});
+
+learnSim();
+showTab('learn');

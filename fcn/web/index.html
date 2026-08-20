@@ -15,15 +15,251 @@
 </header>
 
 <nav>
-  <button data-tab="quote" class="on">詢價與模擬</button>
+  <button data-tab="learn" class="on">FCN 是什麼</button>
+  <button data-tab="quote">詢價與模擬</button>
   <button data-tab="backtest">歷史回測</button>
   <button data-tab="path">單筆路徑檢視</button>
 </nav>
 
 <main>
 
+<!-- ======================= 教學 tab ======================= -->
+<div class="tab on" id="tab-learn">
+
+  <section class="hero">
+    <h2>先收息，再談買股票</h2>
+    <p>
+      FCN 讓你在等買點的同時，每個月先把錢收進來。<br>
+      股票漲、盤整、小跌 —— 配息照領。跌深了，就用你自己訂的折扣價把它買下來。
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>一分鐘看懂</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <h4>挑股票、訂價格</h4>
+        <p>選 1~4 檔你<b>本來就想買</b>的股票，訂一個願意接手的價位
+           —— 這叫<b>執行價</b>，通常是現價的 70~85%。</p>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <h4>每個月領息</h4>
+        <p>契約期間<b>每月固定配息</b>，跟股價漲跌無關。
+           年化常見 8~20%，發行當下就寫死在合約裡。</p>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <h4>到期結算</h4>
+        <p>股價守住你訂的價位 → <b>本金全數拿回</b>。<br>
+           跌破了 → 用你當初訂的<b>折扣價承接股票</b>。</p>
+      </div>
+    </div>
+    <p class="note">
+      另外還有「提前出場」機制：股票漲回原點以上，商品會提早結束、還你本金與已累積的配息。
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>它解決什麼問題</h2>
+    <div class="benefits">
+      <div class="benefit">
+        <div class="ico">📆</div>
+        <h4>盤整也有收入</h4>
+        <p>股票橫盤一整年，直接持有的報酬是 0。
+           同一段行情，FCN 把票息穩定發給你。</p>
+        <div class="tag">最能發揮的行情</div>
+      </div>
+      <div class="benefit">
+        <div class="ico">🛡️</div>
+        <h4>下檔有緩衝</h4>
+        <p>執行價 80% 的意思是：<b>跌 20% 以內，本金一毛不少</b>，
+           而且配息照領。直接持股跌 20% 就是虧 20%。</p>
+        <div class="tag">緩衝 = 100% − 執行價</div>
+      </div>
+      <div class="benefit">
+        <div class="ico">🎯</div>
+        <h4>逢低承接，還先收錢</h4>
+        <p>想等回檔再買的股票，掛限價單是白等。
+           FCN 讓你<b>在等的期間先收一筆權利金</b>，跌到價位才接手。</p>
+        <div class="tag">等待也有報酬</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 互動試算 -->
+  <section class="panel">
+    <h2>拉一下，看你的錢會變怎樣</h2>
+    <p class="hint">
+      以 <b>10 萬美元</b>投入、<b>12 個月</b>、每月配息為例。拖曳滑桿改變條件與到期股價，
+      右側即時比較 <b>FCN</b> 與<b>直接買這檔股票</b>的結果。
+    </p>
+
+    <div class="sim">
+      <div class="sim-controls">
+        <div class="slider">
+          <label>年化配息 <output id="l-cpn">12%</output></label>
+          <input type="range" id="s-cpn" min="4" max="25" step="0.5" value="12">
+        </div>
+        <div class="slider">
+          <label>執行價（承接價位） <output id="l-strike">80%</output></label>
+          <input type="range" id="s-strike" min="60" max="95" step="1" value="80">
+          <small>= 下檔緩衝 <b id="l-buffer">20%</b></small>
+        </div>
+        <div class="slider">
+          <label>下限價（觸發承接的門檻） <output id="l-ki">60%</output></label>
+          <input type="range" id="s-ki" min="50" max="90" step="1" value="60">
+          <small>期間收盤價跌破這條線，到期才可能要接股票</small>
+        </div>
+        <hr>
+        <div class="slider">
+          <label>到期時股價（相對現在） <output id="l-final">100%</output></label>
+          <input type="range" id="s-final" min="20" max="160" step="1" value="100">
+        </div>
+        <label class="chk">
+          <input type="checkbox" id="s-breach">
+          期間曾跌破下限價
+        </label>
+      </div>
+
+      <div class="sim-out">
+        <div class="verdict" id="v-scenario">到期還本</div>
+        <div class="compare">
+          <div class="side fcn">
+            <div class="lbl">投資 FCN</div>
+            <div class="big" id="v-fcn">+12.00%</div>
+            <div class="sub" id="v-fcn-detail">本金 100,000 ＋ 配息 12,000</div>
+          </div>
+          <div class="vs">vs</div>
+          <div class="side hold">
+            <div class="lbl">直接買股票</div>
+            <div class="big" id="v-hold">0.00%</div>
+            <div class="sub" id="v-hold-detail">股票市值 100,000</div>
+          </div>
+        </div>
+        <div class="delta" id="v-delta"></div>
+        <div class="chart" id="v-chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>四種可能的結局</h2>
+    <div class="outcomes">
+      <div class="outcome good">
+        <div class="oh"><span class="badge">A</span> 提前出場</div>
+        <p>股票漲回原點以上 → 商品提早結束，<b>拿回全部本金 ＋ 已累積配息</b>。</p>
+        <div class="of">最常發生。歷史回測中約 <b>9 成</b>的進場日走到這一格。</div>
+      </div>
+      <div class="outcome good">
+        <div class="oh"><span class="badge">B</span> 到期還本（沒破下限價）</div>
+        <p>股價一路在下限價之上 → <b>本金全拿回 ＋ 全額配息</b>，
+           即使期末股價低於執行價也一樣。</p>
+        <div class="of">這格是 FCN 贏過直接持股最漂亮的區間。</div>
+      </div>
+      <div class="outcome good">
+        <div class="oh"><span class="badge">C</span> 到期還本（破了又站回來）</div>
+        <p>期間跌破下限價，但期末收在執行價之上 → <b>照樣全額還本</b>。</p>
+        <div class="of">跌破下限價<b>不等於</b>一定要接股票，這點常被誤解。</div>
+      </div>
+      <div class="outcome risk">
+        <div class="oh"><span class="badge">D</span> 到期承接股票</div>
+        <p>期間破了下限價，且期末仍低於執行價 → <b>用執行價把表現最差的那檔買下來</b>，
+           配息仍然照領。</p>
+        <div class="of">唯一會虧損的一格。虧多少要看股票跌多深。</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>這麼高的配息，是誰付的？</h2>
+    <p class="lead">
+      不是天上掉下來的 —— <b>那是你的權利金</b>。
+    </p>
+    <p>
+      買 FCN 等於你對市場說：「如果這檔股票跌到 80 元，我願意買下來。」
+      願意承擔這個義務的人不多，所以市場付你錢。<b>配息率就是這份承諾的價格。</b>
+    </p>
+    <div class="insight">
+      <div class="ins">
+        <h4>配息越高，代表什麼？</h4>
+        <p>代表市場認為<b>這些標的越容易跌破你的價位</b>。
+           波動越大、標的越多、下限價訂得越高 —— 配息就越高，同時承接機率也越高。
+           高息不是免費午餐，是風險的標價。</p>
+      </div>
+      <div class="ins">
+        <h4>報酬有上限</h4>
+        <p>不管股票漲多少，你拿到的就是配息。標的大漲 50%，
+           你還是那 12% —— 這是換取固定收益必須讓出的東西。
+           所以 FCN 適合<b>你不預期它大漲</b>的標的。</p>
+      </div>
+      <div class="ins">
+        <h4>連結多檔看「最差的那一檔」</h4>
+        <p>四檔股票只要<b>一檔</b>跌破，就可能觸發承接。
+           標的越多配息越高，但踩到的機率也越高 ——
+           這跟一般分散投資的直覺相反。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>什麼時候最適合買</h2>
+    <div class="fitgrid">
+      <div class="fit yes">
+        <h4>✓ 這些情況 FCN 很好用</h4>
+        <ul>
+          <li><b>盤整或緩跌</b>的市況 —— 直接持股沒賺頭，FCN 照領息</li>
+          <li>股票<b>已經大跌一段</b>，你認為再跌空間有限</li>
+          <li>你<b>本來就想買這檔股票</b>，只是嫌現在貴</li>
+          <li>手上有閒置資金，短天期（3~12 個月）想找去處</li>
+        </ul>
+      </div>
+      <div class="fit no">
+        <h4>✗ 這些情況不要碰</h4>
+        <ul>
+          <li>你<b>看好它會大漲</b> —— 直接買股票，別讓出上檔</li>
+          <li>你<b>不願意持有這檔股票</b> —— 那就別簽這個承諾</li>
+          <li>這筆錢<b>短期內要用</b> —— 中途贖回折價很深，且不保證有報價</li>
+          <li>你需要<b>保本</b> —— FCN 明確不保本</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel keyq">
+    <h2>買之前，只要問自己一個問題</h2>
+    <blockquote>
+      如果這檔股票真的跌到執行價，<br>
+      <b>我願不願意用那個價格買下來，並且長期持有？</b>
+    </blockquote>
+    <p>
+      答案是「願意」—— FCN 讓你在等待的期間先把錢收進來，是很合理的工具。<br>
+      答案是「不願意」—— 配息開到 30% 也不該碰，因為你正在承諾一件你做不到的事。
+    </p>
+    <div class="actions">
+      <button class="go" id="btn-goto-quote">用真實行情試算一檔看看 →</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>投資前必須知道的風險</h2>
+    <div class="risks">
+      <div><b>不保本</b><span>最差情況是承接的股票變成壁紙，本金幾乎全數損失，只剩已領配息。</span></div>
+      <div><b>報酬封頂</b><span>標的大漲時，你只拿得到配息，放棄的漲幅可能遠大於配息。</span></div>
+      <div><b>承接的是最差那檔</b><span>不是你最喜歡的，是跌最凶的那一檔。</span></div>
+      <div><b>流動性差</b><span>中途要贖回只能由發行商報價，折價可能很深，且不保證有報價。</span></div>
+      <div><b>發行機構信用風險</b><span>境外券商或銀行發行，無存款保險。發行商倒閉本金可能血本無歸。</span></div>
+      <div><b>匯率風險</b><span>非台幣計價；高息幣別往往伴隨貶值壓力，可能吃掉全部票息。</span></div>
+      <div><b>費用不透明</b><span>成本內含在配息率裡。同條件不同券商報價可差 1~3% 年化，務必比價。</span></div>
+      <div><b>資格限制</b><span>風險等級 RR4~RR5，僅限專業投資人投資。</span></div>
+    </div>
+  </section>
+
+</div>
+
 <!-- ======================= 條件設定（共用） ======================= -->
-<section class="panel">
+<section class="panel" id="terms-panel">
   <h2>報價條件設定</h2>
   <p class="hint">
     對應詢價平台操作：<b>欲詢價的參數請將該欄位留白</b>（一次僅能留白一欄）。
